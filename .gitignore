@@ -1,0 +1,9 @@
+/target
+/dist
+.DS_Store
+*.bin
+*.cue
+*.iso
+*.chd
+.build/
+.swiftpm/
