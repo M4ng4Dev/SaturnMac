@@ -150,6 +150,11 @@ impl AppBundler {
             fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
         }
 
+        // Sign bundle ad-hoc for Apple Silicon (ARM64 requirement)
+        let _ = std::process::Command::new("codesign")
+            .args(["--force", "--deep", "--sign", "-", bundle_root.to_str().unwrap_or("")])
+            .status();
+
         Ok(bundle_root)
     }
 }
@@ -264,8 +269,16 @@ if [ ! -f "$CORE" ]; then
     CORE=$(find "$RESOURCES/cores" -name "*_libretro.dylib" 2>/dev/null | head -n 1)
 fi
 
+LOG_FILE="$SAVES_DIR/last_run.log"
+
 if [ -x "$RUNNER" ]; then
-    exec "$RUNNER" --rom "$ROM_TARGET" --core "$CORE" --title "{title}" --resolution {resolution}
+    echo "Launching: $RUNNER --rom $ROM_TARGET --core $CORE" > "$LOG_FILE"
+    "$RUNNER" --rom "$ROM_TARGET" --core "$CORE" --title "{title}" --resolution {resolution} >> "$LOG_FILE" 2>&1
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+        ERR_MSG=$(tail -n 8 "$LOG_FILE" | tr '\n' ' ' | sed 's/"/\\"/g')
+        osascript -e "display alert \"SaturnMac Error (Codi $EXIT_CODE)\" message \"Error iniciant {app_name}:\n\n$ERR_MSG\n\nFitxer de registre: $LOG_FILE\""
+    fi
 else
     osascript -e 'display alert "SaturnMac: Motor natiu pendent d\x27activar" message "Per fer que {app_name} funcioni en la seva pròpia finestra independent sense obrir OpenEmu, executa al terminal del teu Mac:\n\ncargo run -- setup-runner\n\ni torna a generar l\x27aplicació."'
 fi
