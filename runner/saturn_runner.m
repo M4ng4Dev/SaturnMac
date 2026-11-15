@@ -53,6 +53,7 @@ static uint16_t g_input_buttons = 0;
 // Graphic Enhancement Options
 static bool g_opt_dedither = true;
 static int g_opt_resolution_scale = 4;
+static double g_audio_sample_rate = 44100.0;
 static char g_saturn_dir[1024] = {0};
 
 static void core_log_cb(enum retro_log_level level, const char *fmt, ...) {
@@ -276,7 +277,7 @@ static void audio_callback(void *userData, AudioQueueRef queue, AudioQueueBuffer
 
 static void init_audio(void) {
     AudioStreamBasicDescription fmt = {0};
-    fmt.mSampleRate = AUDIO_FREQ;
+    fmt.mSampleRate = (g_audio_sample_rate > 0) ? g_audio_sample_rate : AUDIO_FREQ;
     fmt.mFormatID = kAudioFormatLinearPCM;
     fmt.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
     fmt.mBytesPerPacket = 4;
@@ -379,7 +380,7 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
 @end
 
 // Window Controller
-@interface SaturnWindowController : NSWindowController <NSWindowDelegate>
+@interface SaturnWindowController : NSWindowController <NSWindowDelegate, NSApplicationDelegate>
 @property (nonatomic, strong) SaturnView *saturnView;
 @property (nonatomic, strong) NSTimer *renderTimer;
 - (void)tick;
@@ -391,6 +392,36 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
     if (!g_core_handle || !p_retro_run) return;
     p_retro_run();
     [self.saturnView updateFrameImage];
+}
+
+- (void)windowWillClose:(NSNotification *)notification {
+    NSLog(@"[SaturnMac] Window closed by user, terminating app...");
+    [NSApp terminate:nil];
+}
+
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+    return YES;
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    NSLog(@"[SaturnMac] Application will terminate, releasing resources...");
+    if (self.renderTimer) {
+        [self.renderTimer invalidate];
+        self.renderTimer = nil;
+    }
+    if (g_audio_queue) {
+        AudioQueueStop(g_audio_queue, YES);
+        AudioQueueDispose(g_audio_queue, YES);
+        g_audio_queue = NULL;
+    }
+    if (p_retro_deinit) {
+        p_retro_deinit();
+        p_retro_deinit = NULL;
+    }
+    if (g_core_handle) {
+        dlclose(g_core_handle);
+        g_core_handle = NULL;
+    }
 }
 
 - (void)keyDown:(NSEvent *)event {
@@ -527,10 +558,42 @@ int main(int argc, const char * argv[]) {
         }
         NSLog(@"[SaturnMac] Game loaded successfully!");
 
+        if (p_retro_get_system_av_info) {
+            struct retro_system_av_info av_info = {0};
+            p_retro_get_system_av_info(&av_info);
+            if (av_info.timing.sample_rate > 0) {
+                g_audio_sample_rate = av_info.timing.sample_rate;
+                NSLog(@"[SaturnMac] Core reported audio sample rate: %.1f Hz", g_audio_sample_rate);
+            }
+        }
+
         init_audio();
 
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+
+        // Set Dock Icon if available
+        NSString *iconPath = [[NSBundle mainBundle] pathForResource:@"AppIcon" ofType:@"icns"];
+        if (iconPath) {
+            NSImage *appIcon = [[NSImage alloc] initWithContentsOfFile:iconPath];
+            if (appIcon) {
+                [NSApp setApplicationIconImage:appIcon];
+            }
+        }
+
+        // Add standard macOS Menubar with Quit Cmd+Q
+        NSMenu *menubar = [NSMenu new];
+        NSMenuItem *appMenuItem = [NSMenuItem new];
+        [menubar addItem:appMenuItem];
+        [NSApp setMainMenu:menubar];
+
+        NSMenu *appMenu = [NSMenu new];
+        NSString *quitTitle = [NSString stringWithFormat:@"Quit %@", gameTitle];
+        NSMenuItem *quitMenuItem = [[NSMenuItem alloc] initWithTitle:quitTitle
+                                                              action:@selector(terminate:)
+                                                       keyEquivalent:@"q"];
+        [appMenu addItem:quitMenuItem];
+        [appMenuItem setSubmenu:appMenu];
 
         NSRect frame = NSMakeRect(100, 100, 960, 720);
         NSWindow *window = [[NSWindow alloc] initWithContentRect:frame
@@ -550,6 +613,7 @@ int main(int argc, const char * argv[]) {
         SaturnWindowController *controller = [[SaturnWindowController alloc] initWithWindow:window];
         controller.saturnView = saturnView;
         window.delegate = controller;
+        [NSApp setDelegate:controller];
 
         // 60 FPS Render Timer
         NSTimer *timer = [NSTimer timerWithTimeInterval:1.0 / 60.0

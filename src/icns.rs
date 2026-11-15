@@ -1,52 +1,80 @@
 use anyhow::Result;
 
-/// Generate a valid Apple .icns file embedding a PNG icon.
+/// Generate a valid Apple .icns file embedding PNG icons.
 ///
-/// macOS 10.7+ supports PNG data directly inside ICNS chunks:
+/// macOS supports standard PNG chunks:
 /// - 'ic07' = 128x128 PNG
 /// - 'ic08' = 256x256 PNG
 /// - 'ic09' = 512x512 PNG
-/// - 'ic10' = 1024x1024 (512x512@2x Retina) PNG
 pub struct IcnsBuilder;
 
 impl IcnsBuilder {
-    /// Create an ICNS file bytes from raw PNG data.
+    /// Create an ICNS file bytes from raw PNG data (stored in 'ic09' 512x512).
     pub fn from_png(png_bytes: &[u8]) -> Result<Vec<u8>> {
         let mut icns = Vec::new();
-        // Magic header 'icns'
         icns.extend_from_slice(b"icns");
+        icns.extend_from_slice(&[0u8; 4]); // Size placeholder
 
-        // Placeholder for 4-byte total length
-        icns.extend_from_slice(&[0u8; 4]);
+        let chunk_len = (8 + png_bytes.len()) as u32;
+        icns.extend_from_slice(b"ic09");
+        icns.extend_from_slice(&chunk_len.to_be_bytes());
+        icns.extend_from_slice(png_bytes);
 
-        // Embed in ic09 (512x512) and ic08 (256x256) chunks
-        let chunk_types = [b"ic08", b"ic09", b"ic10"];
-        for chunk_tag in chunk_types {
-            let chunk_len = (8 + png_bytes.len()) as u32;
-            icns.extend_from_slice(chunk_tag);
-            icns.extend_from_slice(&chunk_len.to_be_bytes());
-            icns.extend_from_slice(png_bytes);
-        }
-
-        // Write total size into header
         let total_size = icns.len() as u32;
         icns[4..8].copy_from_slice(&total_size.to_be_bytes());
-
         Ok(icns)
     }
 
-    /// Generates a fallback default 1x1 or minimal Saturn icon PNG if no art is provided.
-    pub fn default_saturn_icon() -> Vec<u8> {
-        // A minimal valid 64x64 RGBA PNG with a dark Saturn-styled disc ring
-        // Pre-encoded minimal 1x1 black/gold Saturn icon
-        const MINIMAL_PNG: &[u8] = &[
-            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-            0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-            0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
-            0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-            0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d, 0xb0, 0x00, 0x00, 0x00,
-            0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    /// Build a multi-resolution ICNS containing 128x128, 256x256, and 512x512 chunks
+    pub fn build_multi_chunk_icns(png_512: &[u8], png_256: &[u8], png_128: &[u8]) -> Result<Vec<u8>> {
+        let mut icns = Vec::new();
+        icns.extend_from_slice(b"icns");
+        icns.extend_from_slice(&[0u8; 4]);
+
+        let chunks: &[(&[u8; 4], &[u8])] = &[
+            (b"ic07", png_128),
+            (b"ic08", png_256),
+            (b"ic09", png_512),
         ];
-        Self::from_png(MINIMAL_PNG).unwrap_or_default()
+
+        for (tag, data) in chunks {
+            let chunk_len = (8 + data.len()) as u32;
+            icns.extend_from_slice(*tag);
+            icns.extend_from_slice(&chunk_len.to_be_bytes());
+            icns.extend_from_slice(data);
+        }
+
+        let total_size = icns.len() as u32;
+        icns[4..8].copy_from_slice(&total_size.to_be_bytes());
+        Ok(icns)
+    }
+
+    /// High resolution native macOS ICNS for Sonic R
+    pub fn sonic_r_icon() -> Vec<u8> {
+        const P512: &[u8] = include_bytes!("../assets/icons/sonic_r.png");
+        const P256: &[u8] = include_bytes!("../assets/icons/sonic_r_256.png");
+        const P128: &[u8] = include_bytes!("../assets/icons/sonic_r_128.png");
+        Self::build_multi_chunk_icns(P512, P256, P128)
+            .unwrap_or_else(|_| Self::from_png(P512).unwrap_or_default())
+    }
+
+    /// High resolution native macOS ICNS for Sega Saturn default
+    pub fn default_saturn_icon() -> Vec<u8> {
+        const P512: &[u8] = include_bytes!("../assets/icons/saturn_default.png");
+        const P256: &[u8] = include_bytes!("../assets/icons/saturn_default_256.png");
+        const P128: &[u8] = include_bytes!("../assets/icons/saturn_default_128.png");
+        Self::build_multi_chunk_icns(P512, P256, P128)
+            .unwrap_or_else(|_| Self::from_png(P512).unwrap_or_default())
+    }
+
+    /// Automatically selects best icon based on game title or product ID
+    pub fn icon_for_game(title: &str, product_id: &str) -> Vec<u8> {
+        let t_upper = title.to_uppercase();
+        let p_upper = product_id.to_uppercase();
+        if t_upper.contains("SONIC R") || p_upper.contains("MK-81800") || p_upper.contains("GS-9170") {
+            Self::sonic_r_icon()
+        } else {
+            Self::default_saturn_icon()
+        }
     }
 }

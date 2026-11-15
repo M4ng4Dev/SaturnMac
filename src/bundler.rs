@@ -79,10 +79,10 @@ impl AppBundler {
                 let png = fs::read(icon_path)?;
                 IcnsBuilder::from_png(&png)?
             } else {
-                IcnsBuilder::default_saturn_icon()
+                IcnsBuilder::icon_for_game(&info.title, &info.product_id)
             }
         } else {
-            IcnsBuilder::default_saturn_icon()
+            IcnsBuilder::icon_for_game(&info.title, &info.product_id)
         };
         fs::write(resources_dir.join("AppIcon.icns"), icns_bytes)?;
 
@@ -253,8 +253,14 @@ echo " Graphics: {resolution}x Retina Scaling + Metal Pipeline"
 echo " Saves: $SAVES_DIR"
 echo "=========================================="
 
-# Locate primary game image (.cue, .bin, .iso, .chd)
-ROM_TARGET=$(find "$GAME_DIR" -maxdepth 1 \( -name "*.cue" -o -name "*.chd" -o -name "*.iso" -o -name "*.bin" \) | head -n 1)
+# Locate primary game image (.cue, .chd, .iso, .bin)
+ROM_TARGET=$(find "$GAME_DIR" -maxdepth 1 -iname "*.cue" | head -n 1)
+if [ -z "$ROM_TARGET" ]; then
+    ROM_TARGET=$(find "$GAME_DIR" -maxdepth 1 -iname "*.chd" | head -n 1)
+fi
+if [ -z "$ROM_TARGET" ]; then
+    ROM_TARGET=$(find "$GAME_DIR" -maxdepth 1 \( -iname "*.iso" -o -iname "*.bin" \) | head -n 1)
+fi
 
 if [ -z "$ROM_TARGET" ]; then
     osascript -e 'display alert "SaturnMac Error" message "Game ROM files not found inside application bundle."'
@@ -295,6 +301,35 @@ fi
     )
 }
 
+fn convert_audio_to_wav(src: &Path, dest: &Path) -> bool {
+    // 1. Native macOS afconvert: 16-bit Linear PCM Little-Endian 44.1kHz Stereo
+    if let Ok(status) = std::process::Command::new("afconvert")
+        .args(["-f", "WAVE", "-d", "LEI16@44100"])
+        .arg(src)
+        .arg(dest)
+        .status()
+    {
+        if status.success() && dest.exists() {
+            return true;
+        }
+    }
+
+    // 2. Fallback to ffmpeg if available
+    if let Ok(output) = std::process::Command::new("ffmpeg")
+        .args(["-y", "-i"])
+        .arg(src)
+        .args(["-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le"])
+        .arg(dest)
+        .output()
+    {
+        if output.status.success() && dest.exists() {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn copy_rom_files(src_path: &Path, dest_dir: &Path) -> Result<()> {
     if src_path.is_dir() {
         for entry in fs::read_dir(src_path)? {
@@ -315,14 +350,13 @@ fn copy_rom_files(src_path: &Path, dest_dir: &Path) -> Result<()> {
         .to_lowercase();
 
     if ext == "cue" {
-        // Copy CUE file
         let cue_name = src_path.file_name().unwrap_or_default();
-        fs::copy(src_path, dest_dir.join(cue_name))?;
-
-        // Also copy referenced track files
         let parent = src_path.parent().unwrap_or_else(|| Path::new("."));
+
         if let Ok(content) = fs::read_to_string(src_path) {
             let mut track_count = 0;
+            let mut new_cue_lines: Vec<String> = Vec::new();
+
             for line in content.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("FILE") {
@@ -337,14 +371,38 @@ fn copy_rom_files(src_path: &Path, dest_dir: &Path) -> Result<()> {
                         let track_src = parent.join(track_file);
                         if track_src.exists() {
                             track_count += 1;
-                            println!("  📥 Empaquetant pista #{:02}: {}", track_count, track_file);
-                            fs::copy(&track_src, dest_dir.join(track_file))?;
+                            let track_path = Path::new(track_file);
+                            let track_ext = track_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+
+                            if matches!(track_ext.as_str(), "mp3" | "m4a" | "ogg" | "flac" | "aac") {
+                                let stem = track_path.file_stem().and_then(|s| s.to_str()).unwrap_or("track");
+                                let wav_name = format!("{}.wav", stem);
+                                let wav_dest = dest_dir.join(&wav_name);
+
+                                println!("  🎵 Convertint pista d'àudio CD-DA a PCM WAV per a so natiu clar: {} -> {}", track_file, wav_name);
+                                if convert_audio_to_wav(&track_src, &wav_dest) {
+                                    new_cue_lines.push(format!("FILE \"{}\" WAVE", wav_name));
+                                    continue;
+                                } else {
+                                    println!("  ⚠️ No s'ha pogut convertir a WAV, copiant fitxer original: {}", track_file);
+                                    fs::copy(&track_src, dest_dir.join(track_file))?;
+                                }
+                            } else {
+                                println!("  📥 Empaquetant pista #{:02}: {}", track_count, track_file);
+                                fs::copy(&track_src, dest_dir.join(track_file))?;
+                            }
                         } else {
                             println!("  ⚠️ Atenció: Pista no trobada a: {}", track_src.display());
                         }
                     }
+                    new_cue_lines.push(line.to_string());
+                } else {
+                    new_cue_lines.push(line.to_string());
                 }
             }
+            fs::write(dest_dir.join(cue_name), new_cue_lines.join("\n"))?;
+        } else {
+            fs::copy(src_path, dest_dir.join(cue_name))?;
         }
     } else {
         let file_name = src_path.file_name().unwrap_or_default();
