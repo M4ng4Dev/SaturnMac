@@ -24,6 +24,8 @@ if [ ! -f "$DIR/cores/yabasanshiro_libretro.dylib" ]; then
     curl -sL "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/yabasanshiro_libretro.dylib.zip" -o "$DIR/cores/core.zip"
     unzip -q -o "$DIR/cores/core.zip" -d "$DIR/cores"
     rm -f "$DIR/cores/core.zip"
+fi
+
 # Remove quarantine flags and sign ad-hoc for Apple Silicon (ARM64 requirement)
 xattr -cr "$DIR" 2>/dev/null || true
 codesign --force --sign - "$DIR/bin/saturn_runner" 2>/dev/null || true
@@ -34,4 +36,3 @@ for dylib in "$DIR/cores"/*.dylib; do
 done
 
 echo "✅ SaturnMac Standalone Runner ready and codesigned at: $DIR/bin/saturn_runner"
-
