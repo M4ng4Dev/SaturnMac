@@ -226,11 +226,6 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
 }
 
 // Thread-safe Audio buffering
-static void core_audio_sample(int16_t left, int16_t right) {
-    int16_t frame[2] = {left, right};
-    p_retro_set_audio_sample_batch((const int16_t *)frame, 1);
-}
-
 static size_t core_audio_sample_batch(const int16_t *data, size_t frames) {
     pthread_mutex_lock(&g_audio_mutex);
     size_t samples = frames * 2;
@@ -244,6 +239,11 @@ static size_t core_audio_sample_batch(const int16_t *data, size_t frames) {
     }
     pthread_mutex_unlock(&g_audio_mutex);
     return frames;
+}
+
+static void core_audio_sample(int16_t left, int16_t right) {
+    int16_t frame[2] = {left, right};
+    core_audio_sample_batch((const int16_t *)frame, 1);
 }
 
 static void audio_callback(void *userData, AudioQueueRef queue, AudioQueueBufferRef buffer) {
