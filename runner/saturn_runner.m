@@ -3,22 +3,22 @@
 //  SaturnMac - Standalone Native Apple Silicon / macOS Player
 //
 //  Compiles with:
-//  clang -O3 -fobjc-arc -framework Cocoa -framework Metal -framework MetalKit -framework AudioToolbox -framework GameController saturn_runner.m -o saturn_runner
+//  clang -O3 -fobjc-arc -framework Cocoa -framework QuartzCore -framework AudioToolbox -framework GameController saturn_runner.m -o saturn_runner
 //
 
 #import <Cocoa/Cocoa.h>
-#import <Metal/Metal.h>
-#import <MetalKit/MetalKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <GameController/GameController.h>
+#import <pthread.h>
 #import <dlfcn.h>
 #include "libretro.h"
 
-// Audio buffer settings
 #define AUDIO_FREQ 44100
 #define AUDIO_CHANNELS 2
 #define AUDIO_BUF_COUNT 3
 #define AUDIO_BUF_SIZE 4096
+#define RING_BUFFER_SIZE (44100 * 4) // 2 seconds of stereo audio
 
 static void *g_core_handle = NULL;
 static void (*p_retro_init)(void) = NULL;
@@ -39,78 +39,20 @@ static uint32_t *g_fb_data = NULL;
 static size_t g_fb_data_size = 0;
 static enum retro_pixel_format g_pixel_format = RETRO_PIXEL_FORMAT_RGB565;
 
-// Audio Queue
+// Thread-safe Audio Ring Buffer
 static AudioQueueRef g_audio_queue = NULL;
 static AudioQueueBufferRef g_audio_buffers[AUDIO_BUF_COUNT];
-static int16_t g_audio_staging[AUDIO_BUF_SIZE * 4];
-static size_t g_audio_staging_pos = 0;
+static int16_t g_audio_ring[RING_BUFFER_SIZE];
+static size_t g_audio_write_pos = 0;
+static size_t g_audio_read_pos = 0;
+static pthread_mutex_t g_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Input state for RetroPad (Player 1)
 static uint16_t g_input_buttons = 0;
 
-@interface SaturnMetalView : MTKView <MTKViewDelegate>
-@property (nonatomic, strong) id<MTLCommandQueue> commandQueue;
-@property (nonatomic, strong) id<MTLTexture> screenTexture;
-@end
-
-@implementation SaturnMetalView
-
-- (instancetype)initWithFrame:(NSRect)frameRect device:(id<MTLDevice>)device {
-    self = [super initWithFrame:frameRect device:device];
-    if (self) {
-        self.delegate = self;
-        self.preferredFramesPerSecond = 60;
-        self.enableSetNeedsDisplay = NO;
-        self.paused = NO;
-        self.commandQueue = [device newCommandQueue];
-        self.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
-    }
-    return self;
-}
-
-- (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {}
-
-- (void)drawInMTKView:(MTKView *)view {
-    if (!g_core_handle || !p_retro_run) return;
-
-    // Run one emulator frame
-    p_retro_run();
-
-    if (!g_fb_data || g_fb_width == 0 || g_fb_height == 0) return;
-
-    id<MTLDevice> device = self.device;
-    if (!self.screenTexture || self.screenTexture.width != g_fb_width || self.screenTexture.height != g_fb_height) {
-        MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                                                                        width:g_fb_width
-                                                                                       height:g_fb_height
-                                                                                    mipmapped:NO];
-        self.screenTexture = [device newTextureWithDescriptor:desc];
-    }
-
-    [self.screenTexture replaceRegion:MTLRegionMake2D(0, 0, g_fb_width, g_fb_height)
-                          mipmapLevel:0
-                            withBytes:g_fb_data
-                          bytesPerRow:g_fb_width * 4];
-
-    id<CAMetalDrawable> drawable = self.currentDrawable;
-    if (!drawable) return;
-
-    id<MTLCommandBuffer> commandBuffer = [self.commandQueue commandBuffer];
-    MTLRenderPassDescriptor *pass = self.currentRenderPassDescriptor;
-    if (pass) {
-        id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
-        [encoder endEncoding];
-    }
-    [commandBuffer presentDrawable:drawable];
-    [commandBuffer commit];
-}
-
-@end
-
 // Graphic Enhancement Options
 static bool g_opt_dedither = true;
-static int g_opt_resolution_scale = 4; // 1x, 2x, 4x Retina
-
+static int g_opt_resolution_scale = 4;
 static char g_saturn_dir[1024] = {0};
 
 static void core_log_cb(enum retro_log_level level, const char *fmt, ...) {
@@ -164,28 +106,21 @@ static bool core_environment(unsigned cmd, void *data) {
             return true;
         }
         case RETRO_ENVIRONMENT_SET_HW_RENDER: {
-            // Software rendering is used for MetalKit pipeline
+            // Software rendering preferred for native compositor
             return false;
         }
         case RETRO_ENVIRONMENT_GET_VARIABLE: {
             struct retro_variable *var = (struct retro_variable *)data;
             if (!var || !var->key) return false;
 
-            // Apple Silicon GPU & Graphic Enhancements
-            if (strcmp(var->key, "yabasanshiro_resolution") == 0) {
-                var->value = (g_opt_resolution_scale >= 4) ? "4x" : ((g_opt_resolution_scale >= 2) ? "2x" : "1x");
-                return true;
-            } else if (strcmp(var->key, "yabasanshiro_multisample") == 0) {
-                var->value = "4x"; // MSAA 4x Anti-aliasing
-                return true;
-            } else if (strcmp(var->key, "beetle_saturn_internal_resolution") == 0) {
+            if (strcmp(var->key, "yabasanshiro_resolution") == 0 || strcmp(var->key, "yabause_resolution") == 0) {
                 var->value = (g_opt_resolution_scale >= 4) ? "4x" : ((g_opt_resolution_scale >= 2) ? "2x" : "1x");
                 return true;
             } else if (strcmp(var->key, "beetle_saturn_mupen_dithering") == 0) {
-                var->value = "disabled"; // Smooth true-color rendering
+                var->value = "disabled";
                 return true;
             } else if (strcmp(var->key, "beetle_saturn_cdimagecache") == 0) {
-                var->value = "enabled"; // Unified Memory zero-latency CD cache
+                var->value = "enabled";
                 return true;
             }
             return false;
@@ -195,7 +130,7 @@ static bool core_environment(unsigned cmd, void *data) {
     }
 }
 
-// Intelligent De-Dither filter: turns Saturn checkerboard mesh into smooth transparency
+// Intelligent De-Dither filter
 static void apply_dedither_filter(uint32_t *pixels, unsigned width, unsigned height) {
     if (!g_opt_dedither || width < 2 || height < 2) return;
 
@@ -204,17 +139,15 @@ static void apply_dedither_filter(uint32_t *pixels, unsigned width, unsigned hei
             uint32_t p0 = pixels[y * width + x];
             uint32_t p1 = pixels[y * width + x + 1];
 
-            // If adjacent pixels are in a high-contrast dither pattern, blend 50%
-            uint8_t r0 = (p0 >> 16) & 0xFF, g0 = (p0 >> 8) & 0xFF, b0 = p0 & 0xFF;
-            uint8_t r1 = (p1 >> 16) & 0xFF, g1 = (p1 >> 8) & 0xFF, b1 = p1 & 0xFF;
+            uint8_t r0 = p0 & 0xFF, g0 = (p0 >> 8) & 0xFF, b0 = (p0 >> 16) & 0xFF;
+            uint8_t r1 = p1 & 0xFF, g1 = (p1 >> 8) & 0xFF, b1 = (p1 >> 16) & 0xFF;
 
             int diff = abs((int)r0 - (int)r1) + abs((int)g0 - (int)g1) + abs((int)b0 - (int)b1);
-            if (diff > 80 && diff < 400) {
+            if (diff > 60 && diff < 380) {
                 uint8_t r_avg = (r0 + r1) / 2;
                 uint8_t g_avg = (g0 + g1) / 2;
                 uint8_t b_avg = (b0 + b1) / 2;
-                uint32_t blended = (0xFF << 24) | (r_avg << 16) | (g_avg << 8) | b_avg;
-                pixels[y * width + x] = blended;
+                pixels[y * width + x] = (0xFF << 24) | (b_avg << 16) | (g_avg << 8) | r_avg;
             }
         }
     }
@@ -241,8 +174,7 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 uint8_t r = (c >> 16) & 0xFF;
                 uint8_t g = (c >> 8) & 0xFF;
                 uint8_t b = c & 0xFF;
-                // BGRA format for Metal
-                g_fb_data[y * width + x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+                g_fb_data[y * width + x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
             }
         }
     } else if (g_pixel_format == RETRO_PIXEL_FORMAT_RGB565) {
@@ -254,7 +186,7 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 uint8_t r = ((c >> 11) & 0x1F) * 255 / 31;
                 uint8_t g = ((c >> 5) & 0x3F) * 255 / 63;
                 uint8_t b = (c & 0x1F) * 255 / 31;
-                g_fb_data[y * width + x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+                g_fb_data[y * width + x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
             }
         }
     } else { // 0RGB1555
@@ -266,33 +198,90 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 uint8_t r = ((c >> 10) & 0x1F) * 255 / 31;
                 uint8_t g = ((c >> 5) & 0x1F) * 255 / 31;
                 uint8_t b = (c & 0x1F) * 255 / 31;
-                g_fb_data[y * width + x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+                g_fb_data[y * width + x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
             }
         }
     }
 
-    // Apply intelligent de-dithering to smooth out mesh transparencies on Retina screens
     apply_dedither_filter(g_fb_data, width, height);
 }
 
+// Thread-safe Audio buffering
 static void core_audio_sample(int16_t left, int16_t right) {
-    if (g_audio_staging_pos + 2 < sizeof(g_audio_staging) / sizeof(int16_t)) {
-        g_audio_staging[g_audio_staging_pos++] = left;
-        g_audio_staging[g_audio_staging_pos++] = right;
-    }
+    int16_t frame[2] = {left, right};
+    p_retro_set_audio_sample_batch((const int16_t *)frame, 1);
 }
 
 static size_t core_audio_sample_batch(const int16_t *data, size_t frames) {
+    pthread_mutex_lock(&g_audio_mutex);
     size_t samples = frames * 2;
-    size_t available = (sizeof(g_audio_staging) / sizeof(int16_t)) - g_audio_staging_pos;
-    size_t to_copy = (samples < available) ? samples : available;
-    memcpy(&g_audio_staging[g_audio_staging_pos], data, to_copy * sizeof(int16_t));
-    g_audio_staging_pos += to_copy;
+    for (size_t i = 0; i < samples; ++i) {
+        g_audio_ring[g_audio_write_pos] = data[i];
+        g_audio_write_pos = (g_audio_write_pos + 1) % RING_BUFFER_SIZE;
+        if (g_audio_write_pos == g_audio_read_pos) {
+            // Drop oldest sample if buffer overflows
+            g_audio_read_pos = (g_audio_read_pos + 1) % RING_BUFFER_SIZE;
+        }
+    }
+    pthread_mutex_unlock(&g_audio_mutex);
     return frames;
 }
 
+static void audio_callback(void *userData, AudioQueueRef queue, AudioQueueBufferRef buffer) {
+    pthread_mutex_lock(&g_audio_mutex);
+    size_t samples_requested = buffer->mAudioDataBytesCapacity / sizeof(int16_t);
+    int16_t *out = (int16_t *)buffer->mAudioData;
+
+    size_t available = 0;
+    if (g_audio_write_pos >= g_audio_read_pos) {
+        available = g_audio_write_pos - g_audio_read_pos;
+    } else {
+        available = RING_BUFFER_SIZE - (g_audio_read_pos - g_audio_write_pos);
+    }
+
+    size_t to_read = (samples_requested < available) ? samples_requested : available;
+    for (size_t i = 0; i < to_read; ++i) {
+        out[i] = g_audio_ring[g_audio_read_pos];
+        g_audio_read_pos = (g_audio_read_pos + 1) % RING_BUFFER_SIZE;
+    }
+
+    // Fill underflow with silence
+    if (to_read < samples_requested) {
+        memset(&out[to_read], 0, (samples_requested - to_read) * sizeof(int16_t));
+    }
+    buffer->mAudioDataByteSize = buffer->mAudioDataBytesCapacity;
+    pthread_mutex_unlock(&g_audio_mutex);
+
+    AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
+}
+
+static void init_audio(void) {
+    AudioStreamBasicDescription fmt = {0};
+    fmt.mSampleRate = AUDIO_FREQ;
+    fmt.mFormatID = kAudioFormatLinearPCM;
+    fmt.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+    fmt.mBytesPerPacket = 4;
+    fmt.mFramesPerPacket = 1;
+    fmt.mBytesPerFrame = 4;
+    fmt.mChannelsPerFrame = AUDIO_CHANNELS;
+    fmt.mBitsPerChannel = 16;
+
+    OSStatus status = AudioQueueNewOutput(&fmt, audio_callback, NULL, NULL, NULL, 0, &g_audio_queue);
+    if (status != noErr) {
+        NSLog(@"[SaturnMac] AudioQueueNewOutput failed: %d", (int)status);
+        return;
+    }
+
+    for (int i = 0; i < AUDIO_BUF_COUNT; ++i) {
+        AudioQueueAllocateBuffer(g_audio_queue, AUDIO_BUF_SIZE, &g_audio_buffers[i]);
+        g_audio_buffers[i]->mAudioDataByteSize = AUDIO_BUF_SIZE;
+        memset(g_audio_buffers[i]->mAudioData, 0, AUDIO_BUF_SIZE);
+        AudioQueueEnqueueBuffer(g_audio_queue, g_audio_buffers[i], 0, NULL);
+    }
+    AudioQueueStart(g_audio_queue, NULL);
+}
+
 static void core_input_poll(void) {
-    // Poll Apple GameController if connected
     for (GCController *controller in [GCController controllers]) {
         GCExtendedGamepad *pad = controller.extendedGamepad;
         if (pad) {
@@ -324,61 +313,81 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
     return 0;
 }
 
-static void audio_callback(void *userData, AudioQueueRef queue, AudioQueueBufferRef buffer) {
-    size_t to_copy = (g_audio_staging_pos * sizeof(int16_t) < buffer->mAudioDataBytesCapacity) 
-                     ? (g_audio_staging_pos * sizeof(int16_t)) 
-                     : buffer->mAudioDataBytesCapacity;
+// Display View using macOS CoreAnimation Layer
+@interface SaturnView : NSView
+- (void)updateFrameImage;
+@end
 
-    if (to_copy > 0) {
-        memcpy(buffer->mAudioData, g_audio_staging, to_copy);
-        buffer->mAudioDataByteSize = (UInt32)to_copy;
-        g_audio_staging_pos = 0;
-    } else {
-        memset(buffer->mAudioData, 0, buffer->mAudioDataBytesCapacity);
-        buffer->mAudioDataByteSize = buffer->mAudioDataBytesCapacity;
+@implementation SaturnView
+
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    self = [super initWithFrame:frameRect];
+    if (self) {
+        self.wantsLayer = YES;
+        self.layer.backgroundColor = [[NSColor blackColor] CGColor];
+        self.layer.contentsGravity = kCAGravityResizeAspect;
+        self.layer.magnificationFilter = kCAFilterTrilinear;
     }
-    AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
+    return self;
 }
 
-static void init_audio(void) {
-    AudioStreamBasicDescription fmt = {0};
-    fmt.mSampleRate = AUDIO_FREQ;
-    fmt.mFormatID = kAudioFormatLinearPCM;
-    fmt.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-    fmt.mBytesPerPacket = 4;
-    fmt.mFramesPerPacket = 1;
-    fmt.mBytesPerFrame = 4;
-    fmt.mChannelsPerFrame = AUDIO_CHANNELS;
-    fmt.mBitsPerChannel = 16;
+- (void)updateFrameImage {
+    if (!g_fb_data || g_fb_width == 0 || g_fb_height == 0) return;
 
-    AudioQueueNewOutput(&fmt, audio_callback, NULL, NULL, NULL, 0, &g_audio_queue);
-    for (int i = 0; i < AUDIO_BUF_COUNT; ++i) {
-        AudioQueueAllocateBuffer(g_audio_queue, AUDIO_BUF_SIZE, &g_audio_buffers[i]);
-        g_audio_buffers[i]->mAudioDataByteSize = AUDIO_BUF_SIZE;
-        memset(g_audio_buffers[i]->mAudioData, 0, AUDIO_BUF_SIZE);
-        AudioQueueEnqueueBuffer(g_audio_queue, g_audio_buffers[i], 0, NULL);
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, g_fb_data, g_fb_width * g_fb_height * 4, NULL);
+    CGImageRef image = CGImageCreate(
+        g_fb_width,
+        g_fb_height,
+        8,
+        32,
+        g_fb_width * 4,
+        colorSpace,
+        kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
+        provider,
+        NULL,
+        true,
+        kCGRenderingIntentDefault
+    );
+
+    if (image) {
+        self.layer.contents = (__bridge id)image;
+        CGImageRelease(image);
     }
-    AudioQueueStart(g_audio_queue, NULL);
+    CGDataProviderRelease(provider);
+    CGColorSpaceRelease(colorSpace);
 }
+
+@end
 
 // Window Controller
 @interface SaturnWindowController : NSWindowController <NSWindowDelegate>
+@property (nonatomic, strong) SaturnView *saturnView;
+@property (nonatomic, strong) NSTimer *renderTimer;
+- (void)tick;
 @end
 
 @implementation SaturnWindowController
+
+- (void)tick {
+    if (!g_core_handle || !p_retro_run) return;
+    p_retro_run();
+    [self.saturnView updateFrameImage];
+}
+
 - (void)keyDown:(NSEvent *)event {
     switch (event.keyCode) {
-        case 126: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_UP); break;    // Up arrow
-        case 125: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN); break;  // Down arrow
-        case 123: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT); break;  // Left arrow
-        case 124: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT); break; // Right arrow
+        case 126: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_UP); break;
+        case 125: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN); break;
+        case 123: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT); break;
+        case 124: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT); break;
         case 6:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_B); break;     // Z (Saturn A)
         case 7:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_A); break;     // X (Saturn B)
         case 8:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_R); break;     // C (Saturn C)
         case 0:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_Y); break;     // A (Saturn X)
         case 1:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_X); break;     // S (Saturn Y)
         case 2:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_L); break;     // D (Saturn Z)
-        case 36:  g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_START); break; // Enter (Start)
+        case 36:  g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_START); break; // Enter
         default: break;
     }
 }
@@ -420,7 +429,6 @@ int main(int argc, const char * argv[]) {
             return 1;
         }
 
-        // Search for core if not provided
         if (!corePath) {
             NSString *appDir = [[NSBundle mainBundle] resourcePath];
             NSArray *candidates = @[
@@ -488,11 +496,10 @@ int main(int argc, const char * argv[]) {
 
         init_audio();
 
-        // Create Cocoa Application & Window
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
-        NSRect frame = NSMakeRect(100, 100, 960, 720); // 4:3 default window
+        NSRect frame = NSMakeRect(100, 100, 960, 720);
         NSWindow *window = [[NSWindow alloc] initWithContentRect:frame
                                                        styleMask:(NSWindowStyleMaskTitled |
                                                                   NSWindowStyleMaskClosable |
@@ -504,16 +511,28 @@ int main(int argc, const char * argv[]) {
         window.aspectRatio = NSMakeSize(4, 3);
         [window center];
 
-        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-        SaturnMetalView *metalView = [[SaturnMetalView alloc] initWithFrame:frame device:device];
-        window.contentView = metalView;
+        SaturnView *saturnView = [[SaturnView alloc] initWithFrame:frame];
+        window.contentView = saturnView;
 
         SaturnWindowController *controller = [[SaturnWindowController alloc] initWithWindow:window];
+        controller.saturnView = saturnView;
+        window.delegate = controller;
+
+        // 60 FPS Render Timer
+        NSTimer *timer = [NSTimer timerWithTimeInterval:1.0 / 60.0
+                                                 target:controller
+                                               selector:@selector(tick)
+                                               userInfo:nil
+                                                repeats:YES];
+        [[NSRunLoop currentRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+        controller.renderTimer = timer;
+
         [window makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
 
         [NSApp run];
 
+        [timer invalidate];
         p_retro_deinit();
         dlclose(g_core_handle);
     }

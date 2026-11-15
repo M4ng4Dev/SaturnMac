@@ -11,6 +11,7 @@ echo "=========================================================="
 
 clang -O3 -fobjc-arc \
     -framework Cocoa \
+    -framework QuartzCore \
     -framework Metal \
     -framework MetalKit \
     -framework AudioToolbox \
