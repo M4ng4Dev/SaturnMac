@@ -111,27 +111,61 @@ static uint16_t g_input_buttons = 0;
 static bool g_opt_dedither = true;
 static int g_opt_resolution_scale = 4; // 1x, 2x, 4x Retina
 
+static char g_saturn_dir[1024] = {0};
+
+static void core_log_cb(enum retro_log_level level, const char *fmt, ...) {
+    va_list va;
+    va_start(va, fmt);
+    char buf[1024];
+    vsnprintf(buf, sizeof(buf), fmt, va);
+    va_end(va);
+    NSLog(@"[SaturnCore] %s", buf);
+}
+
 // Libretro Callbacks
 static bool core_environment(unsigned cmd, void *data) {
     switch (cmd) {
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
             const enum retro_pixel_format *fmt = (const enum retro_pixel_format *)data;
             g_pixel_format = *fmt;
+            NSLog(@"[SaturnMac] Core set pixel format: %u", (unsigned)*fmt);
             return true;
         }
         case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
         case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY: {
             const char **dir = (const char **)data;
-            NSString *home = NSHomeDirectory();
-            NSString *saturnDir = [home stringByAppendingPathComponent:@"Library/Application Support/SaturnMac"];
-            [[NSFileManager defaultManager] createDirectoryAtPath:saturnDir withIntermediateDirectories:YES attributes:nil error:nil];
-            *dir = [saturnDir UTF8String];
+            if (g_saturn_dir[0] == '\0') {
+                NSString *home = NSHomeDirectory();
+                NSString *saturnDir = [home stringByAppendingPathComponent:@"Library/Application Support/SaturnMac"];
+                [[NSFileManager defaultManager] createDirectoryAtPath:saturnDir withIntermediateDirectories:YES attributes:nil error:nil];
+                strncpy(g_saturn_dir, [saturnDir UTF8String], sizeof(g_saturn_dir) - 1);
+            }
+            *dir = g_saturn_dir;
             return true;
+        }
+        case RETRO_ENVIRONMENT_GET_LOG_INTERFACE: {
+            struct retro_log_callback *cb = (struct retro_log_callback *)data;
+            if (cb) {
+                cb->log = core_log_cb;
+                return true;
+            }
+            return false;
         }
         case RETRO_ENVIRONMENT_GET_CAN_DUPE: {
             bool *b = (bool *)data;
-            *b = true;
+            if (b) *b = true;
             return true;
+        }
+        case RETRO_ENVIRONMENT_SET_MESSAGE: {
+            const struct retro_message *msg = (const struct retro_message *)data;
+            if (msg && msg->msg) {
+                NSLog(@"[SaturnCore Msg] %s", msg->msg);
+            }
+            return true;
+        }
+        case RETRO_ENVIRONMENT_SET_HW_RENDER: {
+            // Software rendering is used for MetalKit pipeline
+            return false;
         }
         case RETRO_ENVIRONMENT_GET_VARIABLE: {
             struct retro_variable *var = (struct retro_variable *)data;
@@ -390,11 +424,11 @@ int main(int argc, const char * argv[]) {
         if (!corePath) {
             NSString *appDir = [[NSBundle mainBundle] resourcePath];
             NSArray *candidates = @[
-                [appDir stringByAppendingPathComponent:@"cores/yabasanshiro_libretro.dylib"],
                 [appDir stringByAppendingPathComponent:@"cores/yabause_libretro.dylib"],
+                [appDir stringByAppendingPathComponent:@"cores/yabasanshiro_libretro.dylib"],
                 [appDir stringByAppendingPathComponent:@"cores/beetle_saturn_libretro.dylib"],
-                [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/SaturnMac/cores/yabasanshiro_libretro.dylib"],
-                [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/SaturnMac/cores/yabause_libretro.dylib"]
+                [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/SaturnMac/cores/yabause_libretro.dylib"],
+                [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/SaturnMac/cores/yabasanshiro_libretro.dylib"]
             ];
             for (NSString *cand in candidates) {
                 if ([[NSFileManager defaultManager] fileExistsAtPath:cand]) {
@@ -408,12 +442,12 @@ int main(int argc, const char * argv[]) {
             NSLog(@"[SaturnMac] No Saturn libretro core found at: %@", corePath);
             NSAlert *alert = [[NSAlert alloc] init];
             alert.messageText = @"Saturn Core Missing";
-            alert.informativeText = @"Please ensure a Saturn core (yabasanshiro_libretro.dylib) is placed inside SaturnMac.";
+            alert.informativeText = @"Please ensure a Saturn core (yabause_libretro.dylib) is placed inside SaturnMac.";
             [alert runModal];
             return 1;
         }
 
-        // Load the core
+        NSLog(@"[SaturnMac] Loading core: %@", corePath);
         g_core_handle = dlopen([corePath UTF8String], RTLD_NOW);
         if (!g_core_handle) {
             NSLog(@"[SaturnMac] dlopen failed: %s", dlerror());
@@ -432,6 +466,7 @@ int main(int argc, const char * argv[]) {
         p_retro_set_input_state = dlsym(g_core_handle, "retro_set_input_state");
         p_retro_set_environment = dlsym(g_core_handle, "retro_set_environment");
 
+        NSLog(@"[SaturnMac] Setting callbacks...");
         p_retro_set_environment(core_environment);
         p_retro_set_video_refresh(core_video_refresh);
         p_retro_set_audio_sample(core_audio_sample);
@@ -439,14 +474,17 @@ int main(int argc, const char * argv[]) {
         p_retro_set_input_poll(core_input_poll);
         p_retro_set_input_state(core_input_state);
 
+        NSLog(@"[SaturnMac] Calling retro_init()...");
         p_retro_init();
 
+        NSLog(@"[SaturnMac] Loading game with retro_load_game(): %@", romPath);
         struct retro_game_info ginfo = {0};
         ginfo.path = [romPath UTF8String];
         if (!p_retro_load_game(&ginfo)) {
             NSLog(@"[SaturnMac] Failed to load ROM: %@", romPath);
             return 1;
         }
+        NSLog(@"[SaturnMac] Game loaded successfully!");
 
         init_audio();
 

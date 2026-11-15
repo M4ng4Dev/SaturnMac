@@ -18,12 +18,19 @@ clang -O3 -fobjc-arc \
     -I"$DIR" \
     "$DIR/saturn_runner.m" -o "$DIR/bin/saturn_runner"
 
-# Download the Apple Silicon Saturn core if not already present
+# Download Apple Silicon Saturn cores (yabause for software/MetalKit, and yabasanshiro)
+if [ ! -f "$DIR/cores/yabause_libretro.dylib" ]; then
+    echo "Downloading Apple Silicon Saturn core (yabause)..."
+    curl -sL "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/yabause_libretro.dylib.zip" -o "$DIR/cores/yabause.zip"
+    unzip -q -o "$DIR/cores/yabause.zip" -d "$DIR/cores"
+    rm -f "$DIR/cores/yabause.zip"
+fi
+
 if [ ! -f "$DIR/cores/yabasanshiro_libretro.dylib" ]; then
     echo "Downloading Apple Silicon Saturn core (yabasanshiro)..."
-    curl -sL "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/yabasanshiro_libretro.dylib.zip" -o "$DIR/cores/core.zip"
-    unzip -q -o "$DIR/cores/core.zip" -d "$DIR/cores"
-    rm -f "$DIR/cores/core.zip"
+    curl -sL "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/yabasanshiro_libretro.dylib.zip" -o "$DIR/cores/yabasanshiro.zip"
+    unzip -q -o "$DIR/cores/yabasanshiro.zip" -d "$DIR/cores"
+    rm -f "$DIR/cores/yabasanshiro.zip"
 fi
 
 # Remove quarantine flags and sign ad-hoc for Apple Silicon (ARM64 requirement)

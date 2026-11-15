@@ -263,7 +263,11 @@ fi
 
 # Standalone native runner
 RUNNER="$RESOURCES/bin/saturn_runner"
-CORE="$RESOURCES/cores/yabasanshiro_libretro.dylib"
+CORE="$RESOURCES/cores/yabause_libretro.dylib"
+
+if [ ! -f "$CORE" ]; then
+    CORE="$RESOURCES/cores/yabasanshiro_libretro.dylib"
+fi
 
 if [ ! -f "$CORE" ]; then
     CORE=$(find "$RESOURCES/cores" -name "*_libretro.dylib" 2>/dev/null | head -n 1)
