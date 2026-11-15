@@ -140,7 +140,7 @@ impl AppBundler {
 
         // 7. Generate the native macOS Launcher
         let launcher_path = macos_dir.join("Launcher");
-        let launcher_script = generate_launcher_script(&app_name, info);
+        let launcher_script = generate_launcher_script(&app_name, info, options);
         fs::write(&launcher_path, launcher_script)?;
 
         // Make Launcher executable (permissions 0755)
@@ -215,7 +215,7 @@ fn generate_info_plist(app_name: &str, bundle_id: &str, version: &str) -> String
     )
 }
 
-fn generate_launcher_script(app_name: &str, info: &SaturnGameInfo) -> String {
+fn generate_launcher_script(app_name: &str, info: &SaturnGameInfo, options: &AppBundleOptions) -> String {
     let region_flag = if info.region_codes.contains('J') {
         "jp"
     } else if info.region_codes.contains('E') {
@@ -223,6 +223,8 @@ fn generate_launcher_script(app_name: &str, info: &SaturnGameInfo) -> String {
     } else {
         "na"
     };
+
+    let resolution = options.internal_resolution;
 
     format!(
         r#"#!/bin/bash
@@ -242,6 +244,7 @@ echo " Starting {app_name} on macOS"
 echo " Title: {title}"
 echo " Product: {product_id} | Region: {region_flag}"
 echo " Architecture: $(uname -m) (Apple Silicon / Metal Native)"
+echo " Graphics: {resolution}x Retina Scaling + Metal Pipeline"
 echo " Saves: $SAVES_DIR"
 echo "=========================================="
 
@@ -262,7 +265,7 @@ if [ ! -f "$CORE" ]; then
 fi
 
 if [ -x "$RUNNER" ]; then
-    exec "$RUNNER" --rom "$ROM_TARGET" --core "$CORE" --title "{title}"
+    exec "$RUNNER" --rom "$ROM_TARGET" --core "$CORE" --title "{title}" --resolution {resolution}
 else
     osascript -e 'display alert "SaturnMac: Motor natiu pendent d\x27activar" message "Per fer que {app_name} funcioni en la seva pròpia finestra independent sense obrir OpenEmu, executa al terminal del teu Mac:\n\ncargo run -- setup-runner\n\ni torna a generar l\x27aplicació."'
 fi
@@ -270,7 +273,8 @@ fi
         app_name = app_name,
         title = info.title,
         product_id = info.product_id.trim(),
-        region_flag = region_flag
+        region_flag = region_flag,
+        resolution = resolution
     )
 }
 

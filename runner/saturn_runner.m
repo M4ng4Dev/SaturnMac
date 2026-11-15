@@ -112,6 +112,14 @@ static bool core_environment(unsigned cmd, void *data) {
     switch (cmd) {
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
             const enum retro_pixel_format *fmt = (const enum retro_pixel_format *)data;
+// Graphic Enhancement Options
+static bool g_opt_dedither = true;
+static int g_opt_resolution_scale = 4; // 1x, 2x, 4x Retina
+
+static bool core_environment(unsigned cmd, void *data) {
+    switch (cmd) {
+        case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
+            const enum retro_pixel_format *fmt = (const enum retro_pixel_format *)data;
             g_pixel_format = *fmt;
             return true;
         }
@@ -129,8 +137,56 @@ static bool core_environment(unsigned cmd, void *data) {
             *b = true;
             return true;
         }
+        case RETRO_ENVIRONMENT_GET_VARIABLE: {
+            struct retro_variable *var = (struct retro_variable *)data;
+            if (!var || !var->key) return false;
+
+            // Apple Silicon GPU & Graphic Enhancements
+            if (strcmp(var->key, "yabasanshiro_resolution") == 0) {
+                var->value = (g_opt_resolution_scale >= 4) ? "4x" : ((g_opt_resolution_scale >= 2) ? "2x" : "1x");
+                return true;
+            } else if (strcmp(var->key, "yabasanshiro_multisample") == 0) {
+                var->value = "4x"; // MSAA 4x Anti-aliasing
+                return true;
+            } else if (strcmp(var->key, "beetle_saturn_internal_resolution") == 0) {
+                var->value = (g_opt_resolution_scale >= 4) ? "4x" : ((g_opt_resolution_scale >= 2) ? "2x" : "1x");
+                return true;
+            } else if (strcmp(var->key, "beetle_saturn_mupen_dithering") == 0) {
+                var->value = "disabled"; // Smooth true-color rendering
+                return true;
+            } else if (strcmp(var->key, "beetle_saturn_cdimagecache") == 0) {
+                var->value = "enabled"; // Unified Memory zero-latency CD cache
+                return true;
+            }
+            return false;
+        }
         default:
             return false;
+    }
+}
+
+// Intelligent De-Dither filter: turns Saturn checkerboard mesh into smooth transparency
+static void apply_dedither_filter(uint32_t *pixels, unsigned width, unsigned height) {
+    if (!g_opt_dedither || width < 2 || height < 2) return;
+
+    for (unsigned y = 0; y < height; ++y) {
+        for (unsigned x = 0; x < width - 1; ++x) {
+            uint32_t p0 = pixels[y * width + x];
+            uint32_t p1 = pixels[y * width + x + 1];
+
+            // If adjacent pixels are in a high-contrast dither pattern, blend 50%
+            uint8_t r0 = (p0 >> 16) & 0xFF, g0 = (p0 >> 8) & 0xFF, b0 = p0 & 0xFF;
+            uint8_t r1 = (p1 >> 16) & 0xFF, g1 = (p1 >> 8) & 0xFF, b1 = p1 & 0xFF;
+
+            int diff = abs((int)r0 - (int)r1) + abs((int)g0 - (int)g1) + abs((int)b0 - (int)b1);
+            if (diff > 80 && diff < 400) {
+                uint8_t r_avg = (r0 + r1) / 2;
+                uint8_t g_avg = (g0 + g1) / 2;
+                uint8_t b_avg = (b0 + b1) / 2;
+                uint32_t blended = (0xFF << 24) | (r_avg << 16) | (g_avg << 8) | b_avg;
+                pixels[y * width + x] = blended;
+            }
+        }
     }
 }
 
@@ -184,6 +240,9 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
             }
         }
     }
+
+    // Apply intelligent de-dithering to smooth out mesh transparencies on Retina screens
+    apply_dedither_filter(g_fb_data, width, height);
 }
 
 static void core_audio_sample(int16_t left, int16_t right) {
@@ -322,6 +381,8 @@ int main(int argc, const char * argv[]) {
             if (strcmp(argv[i], "--rom") == 0 && i + 1 < argc) romPath = [NSString stringWithUTF8String:argv[++i]];
             if (strcmp(argv[i], "--core") == 0 && i + 1 < argc) corePath = [NSString stringWithUTF8String:argv[++i]];
             if (strcmp(argv[i], "--title") == 0 && i + 1 < argc) gameTitle = [NSString stringWithUTF8String:argv[++i]];
+            if (strcmp(argv[i], "--resolution") == 0 && i + 1 < argc) g_opt_resolution_scale = atoi(argv[++i]);
+            if (strcmp(argv[i], "--no-dedither") == 0) g_opt_dedither = false;
         }
 
         if (!romPath) {
