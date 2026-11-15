@@ -113,7 +113,17 @@ static bool core_environment(unsigned cmd, void *data) {
             struct retro_variable *var = (struct retro_variable *)data;
             if (!var || !var->key) return false;
 
-            if (strcmp(var->key, "yabasanshiro_resolution") == 0 || strcmp(var->key, "yabause_resolution") == 0) {
+            if (strcmp(var->key, "yabause_force_hle_bios") == 0) {
+                var->value = "enabled";
+                NSLog(@"[SaturnMac] Enabled yabause_force_hle_bios");
+                return true;
+            } else if (strcmp(var->key, "yabause_addon_cartridge") == 0) {
+                var->value = "4M_ram";
+                return true;
+            } else if (strcmp(var->key, "yabause_numthreads") == 0) {
+                var->value = "4";
+                return true;
+            } else if (strcmp(var->key, "yabasanshiro_resolution") == 0 || strcmp(var->key, "yabause_resolution") == 0) {
                 var->value = (g_opt_resolution_scale >= 4) ? "4x" : ((g_opt_resolution_scale >= 2) ? "2x" : "1x");
                 return true;
             } else if (strcmp(var->key, "beetle_saturn_mupen_dithering") == 0) {
@@ -156,14 +166,22 @@ static void apply_dedither_filter(uint32_t *pixels, unsigned width, unsigned hei
 static void core_video_refresh(const void *data, unsigned width, unsigned height, size_t pitch) {
     if (!data) return;
 
+    static uint64_t s_frame_count = 0;
+    s_frame_count++;
+    if (s_frame_count == 1 || s_frame_count % 300 == 0) {
+        NSLog(@"[SaturnMac] Video frame #%llu received (size: %ux%u, format: %u)", s_frame_count, width, height, (unsigned)g_pixel_format);
+    }
+
     g_fb_width = width;
     g_fb_height = height;
 
-    size_t needed = width * height * sizeof(uint32_t);
+    size_t needed = width * height * 4;
     if (g_fb_data_size < needed) {
         g_fb_data = realloc(g_fb_data, needed);
         g_fb_data_size = needed;
     }
+
+    uint8_t *dst = (uint8_t *)g_fb_data;
 
     if (g_pixel_format == RETRO_PIXEL_FORMAT_XRGB8888) {
         const uint32_t *src = (const uint32_t *)data;
@@ -171,10 +189,11 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         for (unsigned y = 0; y < height; ++y) {
             for (unsigned x = 0; x < width; ++x) {
                 uint32_t c = src[y * src_stride + x];
-                uint8_t r = (c >> 16) & 0xFF;
-                uint8_t g = (c >> 8) & 0xFF;
-                uint8_t b = c & 0xFF;
-                g_fb_data[y * width + x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+                size_t idx = (y * width + x) * 4;
+                dst[idx + 0] = (c >> 16) & 0xFF; // R
+                dst[idx + 1] = (c >> 8) & 0xFF;  // G
+                dst[idx + 2] = c & 0xFF;         // B
+                dst[idx + 3] = 255;              // A
             }
         }
     } else if (g_pixel_format == RETRO_PIXEL_FORMAT_RGB565) {
@@ -183,10 +202,11 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         for (unsigned y = 0; y < height; ++y) {
             for (unsigned x = 0; x < width; ++x) {
                 uint16_t c = src[y * src_stride + x];
-                uint8_t r = ((c >> 11) & 0x1F) * 255 / 31;
-                uint8_t g = ((c >> 5) & 0x3F) * 255 / 63;
-                uint8_t b = (c & 0x1F) * 255 / 31;
-                g_fb_data[y * width + x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+                size_t idx = (y * width + x) * 4;
+                dst[idx + 0] = ((c >> 11) & 0x1F) * 255 / 31; // R
+                dst[idx + 1] = ((c >> 5) & 0x3F) * 255 / 63;  // G
+                dst[idx + 2] = (c & 0x1F) * 255 / 31;         // B
+                dst[idx + 3] = 255;                           // A
             }
         }
     } else { // 0RGB1555
@@ -195,15 +215,14 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         for (unsigned y = 0; y < height; ++y) {
             for (unsigned x = 0; x < width; ++x) {
                 uint16_t c = src[y * src_stride + x];
-                uint8_t r = ((c >> 10) & 0x1F) * 255 / 31;
-                uint8_t g = ((c >> 5) & 0x1F) * 255 / 31;
-                uint8_t b = (c & 0x1F) * 255 / 31;
-                g_fb_data[y * width + x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+                size_t idx = (y * width + x) * 4;
+                dst[idx + 0] = ((c >> 10) & 0x1F) * 255 / 31; // R
+                dst[idx + 1] = ((c >> 5) & 0x1F) * 255 / 31;  // G
+                dst[idx + 2] = (c & 0x1F) * 255 / 31;         // B
+                dst[idx + 3] = 255;                           // A
             }
         }
     }
-
-    apply_dedither_filter(g_fb_data, width, height);
 }
 
 // Thread-safe Audio buffering
@@ -334,28 +353,27 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
 - (void)updateFrameImage {
     if (!g_fb_data || g_fb_width == 0 || g_fb_height == 0) return;
 
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, g_fb_data, g_fb_width * g_fb_height * 4, NULL);
-    CGImageRef image = CGImageCreate(
+    static CGColorSpaceRef s_colorSpace = NULL;
+    if (!s_colorSpace) s_colorSpace = CGColorSpaceCreateDeviceRGB();
+
+    CGContextRef ctx = CGBitmapContextCreate(
+        g_fb_data,
         g_fb_width,
         g_fb_height,
         8,
-        32,
         g_fb_width * 4,
-        colorSpace,
-        kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
-        provider,
-        NULL,
-        true,
-        kCGRenderingIntentDefault
+        s_colorSpace,
+        kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder32Big
     );
 
-    if (image) {
-        self.layer.contents = (__bridge id)image;
-        CGImageRelease(image);
+    if (ctx) {
+        CGImageRef image = CGBitmapContextCreateImage(ctx);
+        if (image) {
+            self.layer.contents = (__bridge id)image;
+            CGImageRelease(image);
+        }
+        CGContextRelease(ctx);
     }
-    CGDataProviderRelease(provider);
-    CGColorSpaceRelease(colorSpace);
 }
 
 @end
@@ -481,6 +499,21 @@ int main(int argc, const char * argv[]) {
         p_retro_set_audio_sample_batch(core_audio_sample_batch);
         p_retro_set_input_poll(core_input_poll);
         p_retro_set_input_state(core_input_state);
+
+        // Auto-detect and import BIOS from OpenEmu if present
+        NSString *home = NSHomeDirectory();
+        NSString *openEmuBios = [home stringByAppendingPathComponent:@"Library/Application Support/OpenEmu/BIOS"];
+        NSString *saturnDir = [home stringByAppendingPathComponent:@"Library/Application Support/SaturnMac"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:saturnDir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSArray *biosNames = @[@"sega_101.bin", @"mpr-17933.bin", @"saturn_bios.bin", @"Sega Saturn (USA).bin", @"Sega Saturn (Japan).bin", @"Sega Saturn (Europe).bin"];
+        for (NSString *name in biosNames) {
+            NSString *src = [openEmuBios stringByAppendingPathComponent:name];
+            NSString *dst = [saturnDir stringByAppendingPathComponent:name];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:src] && ![[NSFileManager defaultManager] fileExistsAtPath:dst]) {
+                [[NSFileManager defaultManager] copyItemAtPath:src toPath:dst error:nil];
+                NSLog(@"[SaturnMac] Found and copied BIOS from OpenEmu: %@", name);
+            }
+        }
 
         NSLog(@"[SaturnMac] Calling retro_init()...");
         p_retro_init();
