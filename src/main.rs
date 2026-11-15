@@ -1,8 +1,10 @@
+mod archive;
 mod bundler;
 mod icns;
 mod parser;
 
 use anyhow::{Context, Result};
+use archive::ZipExtractor;
 use bundler::{AppBundleOptions, AppBundler};
 use clap::{Parser, Subcommand};
 use parser::SaturnDiscParser;
@@ -90,9 +92,23 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Inspect { path, json } => {
-            println!("🔍 Inspecting Sega Saturn disc image: {}", path.display());
-            let info = SaturnDiscParser::parse(&path)
-                .with_context(|| format!("Failed to parse Saturn disc at {}", path.display()))?;
+            let is_zip = path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
+            let (target_rom, temp_cleanup) = if is_zip {
+                println!("📦 S'ha detectat un arxiu ZIP. Descomprimint per a la inspecció: {}", path.display());
+                let temp_dir = ZipExtractor::extract_zip(&path)?;
+                let primary = ZipExtractor::find_primary_rom(&temp_dir)?;
+                (primary, Some(temp_dir))
+            } else {
+                (path.clone(), None)
+            };
+
+            println!("🔍 Inspecting Sega Saturn disc image: {}", target_rom.display());
+            let info = SaturnDiscParser::parse(&target_rom)
+                .with_context(|| format!("Failed to parse Saturn disc at {}", target_rom.display()))?;
+
+            if let Some(ref dir) = temp_cleanup {
+                let _ = std::fs::remove_dir_all(dir);
+            }
 
             if json {
                 let out = serde_json::to_string_pretty(&info)?;
@@ -125,8 +141,19 @@ fn main() -> Result<()> {
             crt,
             widescreen,
         } => {
-            println!("📦 Reading disc info from: {}", path.display());
-            let info = SaturnDiscParser::parse(&path)?;
+            let is_zip = path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
+            let (target_rom, temp_cleanup) = if is_zip {
+                println!("📦 S'ha detectat un arxiu ZIP amb múltiples fitxers. Descomprimint: {}", path.display());
+                let temp_dir = ZipExtractor::extract_zip(&path)?;
+                let primary = ZipExtractor::find_primary_rom(&temp_dir)?;
+                println!("  🎯 S'ha localitzat la imatge principal del joc: {}", primary.file_name().unwrap_or_default().to_string_lossy());
+                (primary, Some(temp_dir))
+            } else {
+                (path.clone(), None)
+            };
+
+            println!("📦 Reading disc info from: {}", target_rom.display());
+            let info = SaturnDiscParser::parse(&target_rom)?;
             println!("✨ Detected Game: \"{}\" ({})", info.title, info.product_id);
 
             let options = AppBundleOptions {
@@ -139,7 +166,11 @@ fn main() -> Result<()> {
             };
 
             std::fs::create_dir_all(&output)?;
-            let bundle_path = AppBundler::create_app_bundle(&path, &info, &output, &options)?;
+            let bundle_path = AppBundler::create_app_bundle(&target_rom, &info, &output, &options)?;
+
+            if let Some(ref dir) = temp_cleanup {
+                let _ = std::fs::remove_dir_all(dir);
+            }
 
             println!("\n🚀 macOS Application Bundle Created Successfully!");
             println!("  Path: {}", bundle_path.display());

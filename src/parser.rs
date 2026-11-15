@@ -43,6 +43,13 @@ impl SaturnDiscParser {
             .to_lowercase();
 
         match ext.as_str() {
+            "zip" => {
+                let temp_dir = crate::archive::ZipExtractor::extract_zip(path)?;
+                let primary = crate::archive::ZipExtractor::find_primary_rom(&temp_dir)?;
+                let info = Self::parse(&primary);
+                let _ = std::fs::remove_dir_all(&temp_dir);
+                info
+            }
             "cue" => Self::parse_cue(path),
             "bin" | "iso" | "img" => Self::parse_binary_disc(path, None),
             _ => {
@@ -214,17 +221,23 @@ impl SaturnDiscParser {
 }
 
 fn clean_ascii(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).trim().to_string()
+    String::from_utf8_lossy(bytes)
+        .trim_matches(|c: char| c.is_whitespace() || c == '\0')
+        .to_string()
 }
 
 fn decode_title(bytes: &[u8]) -> String {
     // Try Shift-JIS first as Saturn titles often contain Japanese or English Shift-JIS
     let (decoded, _, _) = SHIFT_JIS.decode(bytes);
-    let title = decoded.trim().to_string();
+    let title = decoded
+        .trim_matches(|c: char| c.is_whitespace() || c == '\0')
+        .to_string();
     if !title.is_empty() {
         return title;
     }
-    String::from_utf8_lossy(bytes).trim().to_string()
+    String::from_utf8_lossy(bytes)
+        .trim_matches(|c: char| c.is_whitespace() || c == '\0')
+        .to_string()
 }
 
 fn decode_regions(code: &str) -> Vec<String> {

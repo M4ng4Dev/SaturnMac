@@ -48,7 +48,8 @@ static size_t g_audio_read_pos = 0;
 static pthread_mutex_t g_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Input state for RetroPad (Player 1)
-static uint16_t g_input_buttons = 0;
+static uint16_t g_keyboard_buttons = 0;
+static uint16_t g_gamepad_buttons = 0;
 
 // Graphic Enhancement Options
 static bool g_opt_dedither = true;
@@ -302,33 +303,43 @@ static void init_audio(void) {
 }
 
 static void core_input_poll(void) {
+    uint16_t pad_buttons = 0;
     for (GCController *controller in [GCController controllers]) {
         GCExtendedGamepad *pad = controller.extendedGamepad;
         if (pad) {
-            if (pad.dpad.up.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_UP);
-            else g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_UP);
+            // Directional controls: D-Pad and Left Analog Stick
+            if (pad.dpad.up.isPressed || pad.leftThumbstick.up.value > 0.5f) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_UP);
+            if (pad.dpad.down.isPressed || pad.leftThumbstick.down.value > 0.5f) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN);
+            if (pad.dpad.left.isPressed || pad.leftThumbstick.left.value > 0.5f) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT);
+            if (pad.dpad.right.isPressed || pad.leftThumbstick.right.value > 0.5f) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT);
 
-            if (pad.dpad.down.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN);
-            else g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_DOWN);
+            // Saturn 6-button layout:
+            // Bottom row: A (Saturn A), B (Saturn B), Right Shoulder (Saturn C)
+            if (pad.buttonA.isPressed) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_B);
+            if (pad.buttonB.isPressed) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_A);
+            if (pad.rightShoulder.isPressed) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_R);
 
-            if (pad.dpad.left.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT);
-            else g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_LEFT);
+            // Top row: X (Saturn X), Y (Saturn Y), Left Shoulder (Saturn Z)
+            if (pad.buttonX.isPressed) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_Y);
+            if (pad.buttonY.isPressed) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_X);
+            if (pad.leftShoulder.isPressed) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_L);
 
-            if (pad.dpad.right.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT);
-            else g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_RIGHT);
+            // Saturn Analog Triggers (L / R)
+            if (pad.leftTrigger.value > 0.3f) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_L2);
+            if (pad.rightTrigger.value > 0.3f) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_R2);
 
-            if (pad.buttonA.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_B);
-            if (pad.buttonB.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_A);
-            if (pad.buttonX.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_Y);
-            if (pad.buttonY.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_X);
-            if (pad.buttonMenu.pressed) g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_START);
+            // Start & Select/Options
+            if (pad.buttonMenu.isPressed) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_START);
+            if (pad.buttonOptions && pad.buttonOptions.isPressed) pad_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_SELECT);
         }
     }
+    g_gamepad_buttons = pad_buttons;
 }
 
 static int16_t core_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
     if (port == 0 && device == RETRO_DEVICE_JOYPAD) {
-        return (g_input_buttons & (1 << id)) ? 1 : 0;
+        uint16_t combined = g_keyboard_buttons | g_gamepad_buttons;
+        return (combined & (1 << id)) ? 1 : 0;
     }
     return 0;
 }
@@ -339,6 +350,14 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
 @end
 
 @implementation SaturnView
+
+- (BOOL)acceptsFirstResponder {
+    return YES;
+}
+
+- (BOOL)canBecomeKeyView {
+    return YES;
+}
 
 - (instancetype)initWithFrame:(NSRect)frameRect {
     self = [super initWithFrame:frameRect];
@@ -424,38 +443,73 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
     }
 }
 
-- (void)keyDown:(NSEvent *)event {
+- (void)handleKeyDown:(NSEvent *)event {
     switch (event.keyCode) {
-        case 126: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_UP); break;
-        case 125: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN); break;
-        case 123: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT); break;
-        case 124: g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT); break;
-        case 6:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_B); break;     // Z (Saturn A)
-        case 7:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_A); break;     // X (Saturn B)
-        case 8:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_R); break;     // C (Saturn C)
-        case 0:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_Y); break;     // A (Saturn X)
-        case 1:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_X); break;     // S (Saturn Y)
-        case 2:   g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_L); break;     // D (Saturn Z)
-        case 36:  g_input_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_START); break; // Enter
+        // Directional Arrows
+        case 126: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_UP); break;
+        case 125: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN); break;
+        case 123: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT); break;
+        case 124: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT); break;
+
+        // Alternative D-Pad (WASD)
+        case 13:  g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_UP); break;    // W
+        case 1:   g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN); break;  // S
+        case 0:   g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT); break;  // A
+        case 2:   g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT); break; // D
+
+        // Saturn Bottom Row (A, B, C)
+        // J, K, L or Z, X, C
+        case 38: case 6: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_B); break; // J or Z -> Saturn A
+        case 40: case 7: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_A); break; // K or X -> Saturn B
+        case 37: case 8: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_R); break; // L or C -> Saturn C
+
+        // Saturn Top Row (X, Y, Z)
+        // U, I, O
+        case 32: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_Y); break; // U -> Saturn X
+        case 34: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_X); break; // I -> Saturn Y
+        case 31: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_L); break; // O -> Saturn Z
+
+        // Triggers (L / R)
+        case 12: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_L2); break; // Q -> Saturn L
+        case 14: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_R2); break; // E -> Saturn R
+
+        // Start & Select
+        case 36: case 49: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_START); break;  // Enter or Space -> Start
+        case 48: case 53: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_SELECT); break; // Tab or Esc -> Select
         default: break;
     }
 }
 
-- (void)keyUp:(NSEvent *)event {
+- (void)handleKeyUp:(NSEvent *)event {
     switch (event.keyCode) {
-        case 126: g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_UP); break;
-        case 125: g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_DOWN); break;
-        case 123: g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_LEFT); break;
-        case 124: g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_RIGHT); break;
-        case 6:   g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_B); break;
-        case 7:   g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_A); break;
-        case 8:   g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_R); break;
-        case 0:   g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_Y); break;
-        case 1:   g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_X); break;
-        case 2:   g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_L); break;
-        case 36:  g_input_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_START); break;
+        case 126: case 13: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_UP); break;
+        case 125: case 1:  g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_DOWN); break;
+        case 123: case 0:  g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_LEFT); break;
+        case 124: case 2:  g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_RIGHT); break;
+
+        case 38: case 6: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_B); break;
+        case 40: case 7: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_A); break;
+        case 37: case 8: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_R); break;
+
+        case 32: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_Y); break;
+        case 34: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_X); break;
+        case 31: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_L); break;
+
+        case 12: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_L2); break;
+        case 14: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_R2); break;
+
+        case 36: case 49: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_START); break;
+        case 48: case 53: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_SELECT); break;
         default: break;
     }
+}
+
+- (void)keyDown:(NSEvent *)event {
+    [self handleKeyDown:event];
+}
+
+- (void)keyUp:(NSEvent *)event {
+    [self handleKeyUp:event];
 }
 @end
 
@@ -615,6 +669,33 @@ int main(int argc, const char * argv[]) {
         window.delegate = controller;
         [NSApp setDelegate:controller];
 
+        // Global Event Monitor for Keyboard Controls
+        [NSEvent addLocalMonitorForEventsMatchingMask:(NSEventMaskKeyDown | NSEventMaskKeyUp) handler:^NSEvent *(NSEvent *event) {
+            if (event.type == NSEventTypeKeyDown) {
+                [controller handleKeyDown:event];
+            } else if (event.type == NSEventTypeKeyUp) {
+                [controller handleKeyUp:event];
+            }
+            return event;
+        }];
+
+        // Auto-configure connected Gamepads (Xbox, PlayStation, Switch Pro, MFi, 8BitDo)
+        [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification
+                                                         object:nil
+                                                          queue:[NSOperationQueue mainQueue]
+                                                     usingBlock:^(NSNotification *note) {
+            GCController *c = note.object;
+            NSLog(@"[SaturnMac] 🎮 Gamepad connectat i auto-configurat: %@ (%@)", c.vendorName ?: @"Generic Controller", c.productCategory);
+        }];
+        [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidDisconnectNotification
+                                                         object:nil
+                                                          queue:[NSOperationQueue mainQueue]
+                                                     usingBlock:^(NSNotification *note) {
+            GCController *c = note.object;
+            NSLog(@"[SaturnMac] ⚠️ Gamepad desconnectat: %@", c.vendorName ?: @"Controller");
+        }];
+        [GCController startWirelessControllerDiscoveryWithCompletionHandler:nil];
+
         // 60 FPS Render Timer
         NSTimer *timer = [NSTimer timerWithTimeInterval:1.0 / 60.0
                                                  target:controller
@@ -625,6 +706,7 @@ int main(int argc, const char * argv[]) {
         controller.renderTimer = timer;
 
         [window makeKeyAndOrderFront:nil];
+        [window makeFirstResponder:saturnView];
         [NSApp activateIgnoringOtherApps:YES];
 
         [NSApp run];
