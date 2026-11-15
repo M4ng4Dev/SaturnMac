@@ -106,7 +106,39 @@ impl AppBundler {
         }))?;
         fs::write(config_dir.join("saturn.json"), config_json)?;
 
-        // 6. Generate the native macOS Launcher
+        // 6. Embed native Apple Silicon runner and cores if available
+        let bin_dest = resources_dir.join("bin");
+        let cores_dest = resources_dir.join("cores");
+        fs::create_dir_all(&bin_dest)?;
+        fs::create_dir_all(&cores_dest)?;
+
+        let runner_src = Path::new("runner/bin/saturn_runner");
+        if runner_src.exists() {
+            let target_runner = bin_dest.join("saturn_runner");
+            fs::copy(runner_src, &target_runner)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&target_runner, fs::Permissions::from_mode(0o755))?;
+            }
+            println!("  ⚡ S'ha integrat el motor autònom natiu (saturn_runner)");
+        }
+
+        let cores_src = Path::new("runner/cores");
+        if cores_src.exists() {
+            if let Ok(entries) = fs::read_dir(cores_src) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        let name = entry.file_name();
+                        fs::copy(&p, cores_dest.join(&name))?;
+                        println!("  🎮 S'ha integrat el nucli de Saturn: {}", name.to_string_lossy());
+                    }
+                }
+            }
+        }
+
+        // 7. Generate the native macOS Launcher
         let launcher_path = macos_dir.join("Launcher");
         let launcher_script = generate_launcher_script(&app_name, info);
         fs::write(&launcher_path, launcher_script)?;
@@ -221,20 +253,18 @@ if [ -z "$ROM_TARGET" ]; then
     exit 1
 fi
 
-# Check for embedded engine or system runner
+# Standalone native runner
 RUNNER="$RESOURCES/bin/saturn_runner"
+CORE="$RESOURCES/cores/yabasanshiro_libretro.dylib"
+
+if [ ! -f "$CORE" ]; then
+    CORE=$(find "$RESOURCES/cores" -name "*_libretro.dylib" 2>/dev/null | head -n 1)
+fi
 
 if [ -x "$RUNNER" ]; then
-    exec "$RUNNER" --rom "$ROM_TARGET" --config "$CONFIG" --save-path "$SAVES_DIR"
+    exec "$RUNNER" --rom "$ROM_TARGET" --core "$CORE" --title "{title}"
 else
-    # Fallback to OpenEmu / RetroArch or Mednafen if installed on the host
-    if [ -x "/Applications/OpenEmu.app/Contents/MacOS/OpenEmu" ]; then
-        open -a OpenEmu "$ROM_TARGET"
-    elif [ -x "/Applications/RetroArch.app/Contents/MacOS/RetroArch" ]; then
-        /Applications/RetroArch.app/Contents/MacOS/RetroArch -L "$HOME/Library/Application Support/RetroArch/cores/beetle_saturn_libretro.dylib" "$ROM_TARGET"
-    else
-        osascript -e 'display dialog "SaturnMac Application Bundle successfully created for {app_name}!\n\nTo play, ensure your Saturn core or runner is placed in Resources/bin or installed on macOS." buttons {{"OK"}} default button "OK" with title "{app_name}"'
-    fi
+    osascript -e 'display alert "SaturnMac: Motor natiu pendent d\x27activar" message "Per fer que {app_name} funcioni en la seva pròpia finestra independent sense obrir OpenEmu, executa al terminal del teu Mac:\n\ncargo run -- setup-runner\n\ni torna a generar l\x27aplicació."'
 fi
 "#,
         app_name = app_name,

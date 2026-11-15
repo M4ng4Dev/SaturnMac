@@ -47,9 +47,16 @@ O en format JSON:
 ./target/release/saturnmac inspect /camí/al/joc.bin --json
 ```
 
-### 3. Empaquetar el joc en una App nativa de Mac (`.app`)
+### 3. Activar el motor autònom natiu (Standalone Apple Silicon Runner)
+Aquest pas només s'ha de fer un cop. Compila el motor natiu de Mac i descarrega el nucli optimitzat per a Apple Silicon (`yabasanshiro`):
 ```bash
-./target/release/saturnmac bundle /camí/al/joc.cue --output ~/Applications --resolution 4 --crt
+cargo run -- setup-runner
+```
+Això garanteix que les aplicacions generades (`.app`) s'obrin sempre en la seva pròpia finestra de joc nativa sense cap intermediari.
+
+### 4. Empaquetar el joc en una App nativa de Mac (`.app`)
+```bash
+cargo run -- bundle /camí/al/joc.cue --output ~/Applications --resolution 4 --crt
 ```
 *Opcions disponibles:*
 - `--output` / `-o`: Directori on es desarà el paquet `.app` (per defecte: `./dist`).

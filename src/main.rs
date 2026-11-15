@@ -80,6 +80,9 @@ enum Commands {
         #[arg(long, default_value = "U")]
         region: String,
     },
+
+    /// Build or download the native standalone Apple Silicon runner and core
+    SetupRunner,
 }
 
 fn main() -> Result<()> {
@@ -153,6 +156,24 @@ fn main() -> Result<()> {
             println!("🛠️ Generating synthetic Sega Saturn disc image: {}", output.display());
             generate_mock_disc(&output, &title, &product, &region)?;
             println!("✅ Mock Saturn disc image created at {}", output.display());
+        }
+
+        Commands::SetupRunner => {
+            println!("⚙️ Configuració del motor autònom natiu de Mac per a Apple Silicon...");
+            let runner_script = Path::new("runner/build_runner.sh");
+            if !runner_script.exists() {
+                anyhow::bail!("No s'ha trobat runner/build_runner.sh!");
+            }
+            let status = std::process::Command::new("bash")
+                .arg(runner_script)
+                .status()
+                .context("Error executant build_runner.sh")?;
+            if status.success() {
+                println!("\n🎉 Motor autònom natiu per a Apple Silicon preparat amb èxit!");
+                println!("A partir d'ara, qualsevol .app que generis serà 100% autònoma i s'obrirà en la seva pròpia finestra.");
+            } else {
+                anyhow::bail!("Ha fallat la compilació del motor. Comprova la sortida del compilador.");
+            }
         }
     }
 
