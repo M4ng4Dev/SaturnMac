@@ -271,15 +271,25 @@ fn copy_rom_files(src_path: &Path, dest_dir: &Path) -> Result<()> {
         // Also copy referenced track files
         let parent = src_path.parent().unwrap_or_else(|| Path::new("."));
         if let Ok(content) = fs::read_to_string(src_path) {
+            let mut track_count = 0;
             for line in content.lines() {
-                if line.trim().starts_with("FILE") {
-                    if let Some(start) = line.find('"') {
-                        if let Some(end) = line[start + 1..].find('"') {
-                            let track_file = &line[start + 1..start + 1 + end];
-                            let track_src = parent.join(track_file);
-                            if track_src.exists() {
-                                fs::copy(&track_src, dest_dir.join(track_file))?;
-                            }
+                let trimmed = line.trim();
+                if trimmed.starts_with("FILE") {
+                    let filename = if let Some(start) = trimmed.find('"') {
+                        trimmed[start + 1..].find('"').map(|end| &trimmed[start + 1..start + 1 + end])
+                    } else {
+                        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                        if parts.len() >= 2 { Some(parts[1]) } else { None }
+                    };
+
+                    if let Some(track_file) = filename {
+                        let track_src = parent.join(track_file);
+                        if track_src.exists() {
+                            track_count += 1;
+                            println!("  📥 Empaquetant pista #{:02}: {}", track_count, track_file);
+                            fs::copy(&track_src, dest_dir.join(track_file))?;
+                        } else {
+                            println!("  ⚠️ Atenció: Pista no trobada a: {}", track_src.display());
                         }
                     }
                 }
@@ -287,6 +297,7 @@ fn copy_rom_files(src_path: &Path, dest_dir: &Path) -> Result<()> {
         }
     } else {
         let file_name = src_path.file_name().unwrap_or_default();
+        println!("  📥 Copiant fitxer del disc: {}", file_name.to_string_lossy());
         fs::copy(src_path, dest_dir.join(file_name))?;
     }
 
