@@ -107,15 +107,11 @@ static uint16_t g_input_buttons = 0;
 
 @end
 
-// Libretro Callbacks
-static bool core_environment(unsigned cmd, void *data) {
-    switch (cmd) {
-        case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
-            const enum retro_pixel_format *fmt = (const enum retro_pixel_format *)data;
 // Graphic Enhancement Options
 static bool g_opt_dedither = true;
 static int g_opt_resolution_scale = 4; // 1x, 2x, 4x Retina
 
+// Libretro Callbacks
 static bool core_environment(unsigned cmd, void *data) {
     switch (cmd) {
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
