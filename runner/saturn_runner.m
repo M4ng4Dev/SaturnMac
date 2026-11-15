@@ -32,6 +32,7 @@ static void (*p_retro_set_audio_sample_batch)(retro_audio_sample_batch_t) = NULL
 static void (*p_retro_set_input_poll)(retro_input_poll_t) = NULL;
 static void (*p_retro_set_input_state)(retro_input_state_t) = NULL;
 static void (*p_retro_set_environment)(retro_environment_t) = NULL;
+static void (*p_retro_set_controller_port_device)(unsigned port, unsigned device) = NULL;
 
 static uint32_t g_fb_width = 320;
 static uint32_t g_fb_height = 240;
@@ -98,6 +99,14 @@ static bool core_environment(unsigned cmd, void *data) {
         case RETRO_ENVIRONMENT_GET_CAN_DUPE: {
             bool *b = (bool *)data;
             if (b) *b = true;
+            return true;
+        }
+        case RETRO_ENVIRONMENT_GET_INPUT_BITMASKS: {
+            bool *b = (bool *)data;
+            if (b) *b = true;
+            return true;
+        }
+        case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO: {
             return true;
         }
         case RETRO_ENVIRONMENT_SET_MESSAGE: {
@@ -337,10 +346,32 @@ static void core_input_poll(void) {
 }
 
 static int16_t core_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
-    if (port == 0 && device == RETRO_DEVICE_JOYPAD) {
-        uint16_t combined = g_keyboard_buttons | g_gamepad_buttons;
-        return (combined & (1 << id)) ? 1 : 0;
+    if (port != 0) return 0;
+
+    uint16_t combined = g_keyboard_buttons | g_gamepad_buttons;
+    unsigned base_device = device & 0xFF;
+
+    // Both Standard 6-button Joypad and 3D Analog Controller digital states
+    if (base_device == RETRO_DEVICE_JOYPAD || base_device == RETRO_DEVICE_ANALOG) {
+        if (id == RETRO_DEVICE_ID_JOYPAD_MASK) {
+            return (int16_t)combined;
+        }
+        if (id < 16) {
+            return (combined & (1 << id)) ? 1 : 0;
+        }
     }
+
+    // Saturn 3D Pad Analog Stick support (e.g. Sonic R steering)
+    if (base_device == RETRO_DEVICE_ANALOG && index == RETRO_DEVICE_INDEX_ANALOG_LEFT) {
+        if (id == RETRO_DEVICE_ID_ANALOG_X) {
+            if (combined & (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT)) return 0x7FFF;
+            if (combined & (1 << RETRO_DEVICE_ID_JOYPAD_LEFT))  return -0x7FFF;
+        } else if (id == RETRO_DEVICE_ID_ANALOG_Y) {
+            if (combined & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN)) return 0x7FFF;
+            if (combined & (1 << RETRO_DEVICE_ID_JOYPAD_UP))    return -0x7FFF;
+        }
+    }
+
     return 0;
 }
 
@@ -444,6 +475,7 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
 }
 
 - (void)handleKeyDown:(NSEvent *)event {
+    NSLog(@"[SaturnMac Input] KeyDown: code=%u", (unsigned)event.keyCode);
     switch (event.keyCode) {
         // Directional Arrows
         case 126: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_UP); break;
@@ -474,8 +506,13 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
         case 14: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_R2); break; // E -> Saturn R
 
         // Start & Select
-        case 36: case 49: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_START); break;  // Enter or Space -> Start
-        case 48: case 53: g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_SELECT); break; // Tab or Esc -> Select
+        // Enter (36), Space (49), NumPad Enter (76), V (9), 1 (18)
+        case 36: case 49: case 76: case 9: case 18:
+            g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_START);
+            break;
+        case 48: case 53: // Tab or Esc
+            g_keyboard_buttons |= (1 << RETRO_DEVICE_ID_JOYPAD_SELECT);
+            break;
         default: break;
     }
 }
@@ -498,8 +535,12 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
         case 12: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_L2); break;
         case 14: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_R2); break;
 
-        case 36: case 49: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_START); break;
-        case 48: case 53: g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_SELECT); break;
+        case 36: case 49: case 76: case 9: case 18:
+            g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_START);
+            break;
+        case 48: case 53:
+            g_keyboard_buttons &= ~(1 << RETRO_DEVICE_ID_JOYPAD_SELECT);
+            break;
         default: break;
     }
 }
@@ -576,6 +617,7 @@ int main(int argc, const char * argv[]) {
         p_retro_set_input_poll = dlsym(g_core_handle, "retro_set_input_poll");
         p_retro_set_input_state = dlsym(g_core_handle, "retro_set_input_state");
         p_retro_set_environment = dlsym(g_core_handle, "retro_set_environment");
+        p_retro_set_controller_port_device = dlsym(g_core_handle, "retro_set_controller_port_device");
 
         NSLog(@"[SaturnMac] Setting callbacks...");
         p_retro_set_environment(core_environment);
@@ -603,6 +645,11 @@ int main(int argc, const char * argv[]) {
         NSLog(@"[SaturnMac] Calling retro_init()...");
         p_retro_init();
 
+        if (p_retro_set_controller_port_device) {
+            p_retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+            p_retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+        }
+
         NSLog(@"[SaturnMac] Loading game with retro_load_game(): %@", romPath);
         struct retro_game_info ginfo = {0};
         ginfo.path = [romPath UTF8String];
@@ -611,6 +658,12 @@ int main(int argc, const char * argv[]) {
             return 1;
         }
         NSLog(@"[SaturnMac] Game loaded successfully!");
+
+        if (p_retro_set_controller_port_device) {
+            p_retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+            p_retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+            NSLog(@"[SaturnMac] Initialized Controller Port 0 & 1 -> RETRO_DEVICE_JOYPAD (Standard Pad connected)");
+        }
 
         if (p_retro_get_system_av_info) {
             struct retro_system_av_info av_info = {0};
