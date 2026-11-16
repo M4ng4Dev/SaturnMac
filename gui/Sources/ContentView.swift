@@ -778,12 +778,44 @@ struct ContentView: View {
     }
 
     func ensureOutputDirectory() {
-        try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: YES)
+        try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
     }
 
     func appendLog(_ line: String) {
         logLines.append(line)
     }
+}
+
+// MARK: - Components
+
+struct TagBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.bold())
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.15))
+            .foregroundColor(color)
+            .cornerRadius(6)
+    }
+}
+
+struct VisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 // MARK: - Helpers

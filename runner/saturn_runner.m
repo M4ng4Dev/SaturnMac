@@ -753,7 +753,10 @@ int main(int argc, const char * argv[]) {
             panel.title = @"SaturnMac - Selecciona un joc de Sega Saturn";
             panel.message = @"Tria una imatge de disc (.cue, .iso, .chd, .bin o .zip) per jugar:";
             panel.prompt = @"Jugar";
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
             panel.allowedFileTypes = @[@"cue", @"chd", @"iso", @"bin", @"zip"];
+#pragma clang diagnostic pop
             panel.canChooseFiles = YES;
             panel.canChooseDirectories = NO;
             panel.allowsMultipleSelection = NO;
