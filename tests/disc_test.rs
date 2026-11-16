@@ -71,3 +71,51 @@ fn fill_slice(src: &[u8], dest: &mut [u8]) {
     let len = src.len().min(dest.len());
     dest[..len].copy_from_slice(&src[..len]);
 }
+
+#[test]
+fn test_cue_track_healing_and_resolution() {
+    let test_dir = Path::new("target/test_output_healing");
+    let _ = fs::remove_dir_all(test_dir);
+    fs::create_dir_all(test_dir).unwrap();
+
+    let actual_bin_path = test_dir.join("Bomberman Wars.bin");
+    let cue_path = test_dir.join("Bomberman Wars.cue");
+
+    // Create binary disc data
+    let mut sector = vec![0u8; 2352 * 16];
+    sector[0..12].copy_from_slice(&[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+    sector[12..15].copy_from_slice(&[0x00, 0x02, 0x00]);
+    sector[15] = 0x01;
+
+    let ip = &mut sector[16..16 + 256];
+    fill_slice(b"SEGA SEGASATURN ", &mut ip[0..16]);
+    fill_slice(b"HUDSON SOFT     ", &mut ip[16..32]);
+    fill_slice(b"T-14304G  ", &mut ip[32..42]);
+    fill_slice(b"V1.000", &mut ip[42..48]);
+    fill_slice(b"19980416", &mut ip[48..56]);
+    fill_slice(b"CD-1/1  ", &mut ip[56..64]);
+    fill_slice(b"J         ", &mut ip[64..74]);
+    fill_slice(b"BOMBERMAN WARS", &mut ip[96..208]);
+
+    fs::write(&actual_bin_path, &sector).unwrap();
+
+    // Create CUE sheet that erroneously references .iso (instead of .bin) with Windows path
+    let bad_cue_content = "FILE \"C:\\Games\\Bomberman Wars.iso\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n";
+    fs::write(&cue_path, bad_cue_content).unwrap();
+
+    // Parse via CUE: should heal and locate Bomberman Wars.bin automatically!
+    let info = SaturnDiscParser::parse(&cue_path).expect("Should successfully heal and parse CUE");
+    assert_eq!(info.product_id, "T-14304G");
+    assert_eq!(info.title, "BOMBERMAN WARS");
+
+    // Bundle via AppBundler: should package Bomberman Wars.bin and write healed CUE
+    let options = AppBundleOptions::default();
+    let app_bundle = AppBundler::create_app_bundle(&cue_path, &info, test_dir, &options)
+        .expect("Should bundle game with healed CUE");
+
+    assert!(app_bundle.join("Contents/Resources/Game/Bomberman Wars.cue").exists());
+    assert!(app_bundle.join("Contents/Resources/Game/Bomberman Wars.bin").exists());
+
+    let healed_cue = fs::read_to_string(app_bundle.join("Contents/Resources/Game/Bomberman Wars.cue")).unwrap();
+    assert!(healed_cue.contains("FILE \"Bomberman Wars.bin\" BINARY"));
+}

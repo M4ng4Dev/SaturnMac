@@ -114,10 +114,10 @@ impl ArchiveExtractor {
 
         let candidate_commands: [(&str, Vec<&str>); 13] = [
             // unar (The Unarchiver / Homebrew)
-            ("unar", vec!["-quiet", "-o", dest_str, archive_str]),
-            ("/Applications/The Unarchiver.app/Contents/SharedSupport/unar", vec!["-quiet", "-o", dest_str, archive_str]),
-            ("/opt/homebrew/bin/unar", vec!["-quiet", "-o", dest_str, archive_str]),
-            ("/usr/local/bin/unar", vec!["-quiet", "-o", dest_str, archive_str]),
+            ("unar", vec!["-quiet", "-D", "-o", dest_str, archive_str]),
+            ("/Applications/The Unarchiver.app/Contents/SharedSupport/unar", vec!["-quiet", "-D", "-o", dest_str, archive_str]),
+            ("/opt/homebrew/bin/unar", vec!["-quiet", "-D", "-o", dest_str, archive_str]),
+            ("/usr/local/bin/unar", vec!["-quiet", "-D", "-o", dest_str, archive_str]),
 
             // 7z / 7za
             ("7z", vec!["x", "-y", &out_7z, archive_str]),

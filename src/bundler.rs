@@ -490,31 +490,54 @@ fn copy_rom_files(src_path: &Path, dest_dir: &Path) -> Result<()> {
                     };
 
                     if let Some(track_file) = filename {
-                        let track_src = parent.join(track_file);
-                        if track_src.exists() {
+                        let resolved_track_path = crate::parser::resolve_cue_track(src_path, track_file);
+                        if let Some(ref track_src) = resolved_track_path {
                             track_count += 1;
-                            let track_path = Path::new(track_file);
-                            let track_ext = track_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                            let actual_filename = track_src
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
+                            let track_ext = track_src
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
 
                             if matches!(track_ext.as_str(), "mp3" | "m4a" | "ogg" | "flac" | "aac") {
-                                let stem = track_path.file_stem().and_then(|s| s.to_str()).unwrap_or("track");
+                                let stem = track_src.file_stem().and_then(|s| s.to_str()).unwrap_or("track");
                                 let wav_name = format!("{}.wav", stem);
                                 let wav_dest = dest_dir.join(&wav_name);
 
                                 println!("  🎵 Convertint pista d'àudio CD-DA a PCM WAV per a so natiu clar: {} -> {}", track_file, wav_name);
-                                if convert_audio_to_wav(&track_src, &wav_dest) {
+                                if convert_audio_to_wav(track_src, &wav_dest) {
                                     new_cue_lines.push(format!("FILE \"{}\" WAVE", wav_name));
                                     continue;
                                 } else {
-                                    println!("  ⚠️ No s'ha pogut convertir a WAV, copiant fitxer original: {}", track_file);
-                                    fs::copy(&track_src, dest_dir.join(track_file))?;
+                                    println!("  ⚠️ No s'ha pogut convertir a WAV, copiant fitxer original: {}", actual_filename);
+                                    fs::copy(track_src, dest_dir.join(&actual_filename))?;
+                                    new_cue_lines.push(format!("FILE \"{}\" BINARY", actual_filename));
+                                    continue;
                                 }
                             } else {
-                                println!("  📥 Empaquetant pista #{:02}: {}", track_count, track_file);
-                                fs::copy(&track_src, dest_dir.join(track_file))?;
+                                if track_file != actual_filename {
+                                    println!("  ✨ Pista corregida automàticament al CUE: \"{}\" -> \"{}\"", track_file, actual_filename);
+                                }
+                                println!("  📥 Empaquetant pista #{:02}: {}", track_count, actual_filename);
+                                fs::copy(track_src, dest_dir.join(&actual_filename))?;
+
+                                let file_type = if trimmed.ends_with("BINARY") {
+                                    "BINARY"
+                                } else if trimmed.ends_with("MOTOROLA") {
+                                    "MOTOROLA"
+                                } else {
+                                    "BINARY"
+                                };
+                                new_cue_lines.push(format!("FILE \"{}\" {}", actual_filename, file_type));
+                                continue;
                             }
                         } else {
-                            println!("  ⚠️ Atenció: Pista no trobada a: {}", track_src.display());
+                            println!("  ⚠️ Atenció: Pista no trobada a: {}", parent.join(track_file).display());
                         }
                     }
                     new_cue_lines.push(line.to_string());

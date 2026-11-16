@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use encoding_rs::SHIFT_JIS;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -106,7 +106,11 @@ impl SaturnDiscParser {
                             || track_type.contains("AUDIO") == false)
                     {
                         if let Some(ref fname) = current_file {
-                            first_data_track_path = Some(parent_dir.join(fname));
+                            if let Some(resolved) = resolve_cue_track(cue_path, fname) {
+                                first_data_track_path = Some(resolved);
+                            } else {
+                                first_data_track_path = Some(parent_dir.join(fname));
+                            }
                         }
                     }
                 }
@@ -114,12 +118,29 @@ impl SaturnDiscParser {
         }
 
         let data_bin = match first_data_track_path {
-            Some(p) => p,
+            Some(p) if p.is_file() => p,
+            Some(p) => {
+                let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if let Some(resolved) = resolve_cue_track(cue_path, fname) {
+                    println!("  ✨ Pista de dades localitzada automàticament: \"{}\" -> \"{}\"", fname, resolved.file_name().unwrap_or_default().to_string_lossy());
+                    resolved
+                } else if let Some(resolved) = resolve_cue_track(cue_path, "") {
+                    println!("  ✨ Pista de dades alternativa localitzada: \"{}\"", resolved.file_name().unwrap_or_default().to_string_lossy());
+                    resolved
+                } else {
+                    bail!(
+                        "No s'ha pogut localitzar el fitxer de dades per a la pista 01 (\"{}\") indicat al CUE.\n\
+                         Ruta esperada: {}\n\
+                         Comprova que el fitxer .bin o .iso es troba a la mateixa carpeta.",
+                        fname,
+                        p.display()
+                    );
+                }
+            }
             None => {
-                // Fallback: look for a file with same base name and .bin
-                let fallback = cue_path.with_extension("bin");
-                if fallback.exists() {
-                    fallback
+                // Fallback: look for a file with same base name and common extensions
+                if let Some(resolved) = resolve_cue_track(cue_path, "") {
+                    resolved
                 } else {
                     bail!("Could not locate Track 01 data file referenced in CUE sheet");
                 }
@@ -281,4 +302,214 @@ fn decode_peripherals(code: &str) -> Vec<String> {
         periphs.push("Standard Control Pad".to_string());
     }
     periphs
+}
+
+/// Resolve a referenced disc or track file from a CUE sheet.
+///
+/// Handles:
+/// 1. Windows-style paths (e.g. `C:\Games\Track01.bin` or `.\Track01.bin`)
+/// 2. Case-insensitivity (e.g. `GAME.BIN` vs `game.bin` vs `Game.Bin`)
+/// 3. Common extension mismatches (e.g. CUE points to `.iso` but file is `.bin`, `.img`, `.raw`, `.mdf`, or vice-versa)
+/// 4. Common Track naming conventions (e.g. `Track 01.bin`, `Track 1.bin`, `(Track 1).bin`)
+/// 5. Files extracted into subdirectories or parent directories within archive temp folders
+/// 6. Single disc image fallback (if there is only one data image in the directory, it's used)
+pub fn resolve_cue_track(cue_path: &Path, referenced_name: &str) -> Option<PathBuf> {
+    let parent_dir = cue_path.parent().unwrap_or_else(|| Path::new("."));
+
+    // 1. Clean referenced name: strip quotes, trim whitespace
+    let clean = referenced_name.trim().trim_matches('"').trim_matches('\'');
+    let normalized = clean.replace('\\', "/");
+    let bare_name = Path::new(&normalized)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&normalized);
+
+    // 2. Direct exact check if referenced_name is non-empty
+    if !clean.is_empty() {
+        let direct = parent_dir.join(clean);
+        if direct.is_file() {
+            return Some(direct);
+        }
+
+        let bare_path = parent_dir.join(bare_name);
+        if bare_path.is_file() {
+            return Some(bare_path);
+        }
+
+        // 3. Case-insensitive search in parent_dir
+        if let Some(found) = find_case_insensitive(parent_dir, bare_name) {
+            return Some(found);
+        }
+    }
+
+    // 4. Extension swaps for disc images:
+    // If referenced file has an extension like .iso, .bin, .img, .raw, .mdf, try all alternatives
+    let disc_extensions = ["bin", "iso", "img", "raw", "mdf"];
+    let bare_path_obj = Path::new(bare_name);
+    let stem = if !bare_name.is_empty() {
+        bare_path_obj
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(bare_name)
+    } else {
+        cue_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+    };
+
+    if !stem.is_empty() {
+        for alt_ext in &disc_extensions {
+            let alt_name = format!("{}.{}", stem, alt_ext);
+            if let Some(found) = find_case_insensitive(parent_dir, &alt_name) {
+                return Some(found);
+            }
+        }
+    }
+
+    // Also try CUE file stem with alternative extensions
+    let cue_stem = cue_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if !cue_stem.is_empty() && cue_stem != stem {
+        for alt_ext in &disc_extensions {
+            let alt_name = format!("{}.{}", cue_stem, alt_ext);
+            if let Some(found) = find_case_insensitive(parent_dir, &alt_name) {
+                return Some(found);
+            }
+        }
+    }
+
+    // 5. Track pattern matches (e.g., "Track 1", "Track 01", "track1")
+    if let Ok(entries) = fs::read_dir(parent_dir) {
+        let mut candidates = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let e_ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if disc_extensions.contains(&e_ext.as_str()) {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if name.contains("track 1")
+                        || name.contains("track 01")
+                        || name.contains("track1")
+                        || name.contains("track01")
+                    {
+                        return Some(path);
+                    }
+                    candidates.push(path);
+                }
+            }
+        }
+
+        // If there is only ONE data disc image in parent_dir, it must be the data track
+        if candidates.len() == 1 {
+            return Some(candidates.remove(0));
+        }
+    }
+
+    // 6. Search in entire temp / parent directory tree
+    let root_search_dir = if parent_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .starts_with("saturnmac_")
+    {
+        parent_dir
+    } else if let Some(grandparent) = parent_dir.parent() {
+        if grandparent
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .starts_with("saturnmac_")
+        {
+            grandparent
+        } else {
+            parent_dir
+        }
+    } else {
+        parent_dir
+    };
+
+    if let Some(found) = search_recursive_for_disc(root_search_dir, stem, &disc_extensions) {
+        return Some(found);
+    }
+
+    None
+}
+
+fn find_case_insensitive(dir: &Path, target_filename: &str) -> Option<PathBuf> {
+    let target_lower = target_filename.to_lowercase();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+                    if fname.to_lowercase() == target_lower {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn search_recursive_for_disc(dir: &Path, stem: &str, valid_exts: &[&str]) -> Option<PathBuf> {
+    let stem_lower = stem.to_lowercase();
+    let mut disc_candidates = Vec::new();
+    let mut track1_candidate = None;
+
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current_dir) = stack.pop() {
+        if let Ok(entries) = fs::read_dir(&current_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.is_file() {
+                    let ext = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if valid_exts.contains(&ext.as_str()) {
+                        let fname = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        if !stem_lower.is_empty()
+                            && (fname.starts_with(&stem_lower) || stem_lower.starts_with(&fname))
+                        {
+                            return Some(path);
+                        }
+                        if fname.contains("track 1")
+                            || fname.contains("track 01")
+                            || fname.contains("track1")
+                        {
+                            track1_candidate = Some(path.clone());
+                        }
+                        disc_candidates.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(t1) = track1_candidate {
+        return Some(t1);
+    }
+    if disc_candidates.len() == 1 {
+        return Some(disc_candidates.remove(0));
+    }
+    disc_candidates.into_iter().next()
 }
