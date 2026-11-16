@@ -44,3 +44,47 @@ for dylib in "$DIR/cores"/*.dylib; do
 done
 
 echo "✅ SaturnMac Standalone Runner ready and codesigned at: $DIR/bin/saturn_runner"
+
+# Build standalone SaturnMac.app GUI application
+APP_DIR="$DIR/../dist/SaturnMac.app"
+mkdir -p "$APP_DIR/Contents/MacOS"
+mkdir -p "$APP_DIR/Contents/Resources/cores"
+cp "$DIR/bin/saturn_runner" "$APP_DIR/Contents/MacOS/SaturnMac"
+chmod +x "$APP_DIR/Contents/MacOS/SaturnMac"
+cp "$DIR/cores"/*.dylib "$APP_DIR/Contents/Resources/cores/" 2>/dev/null || true
+
+cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>SaturnMac</string>
+    <key>CFBundleDisplayName</key>
+    <string>SaturnMac</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.saturnmac.launcher</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleExecutable</key>
+    <string>SaturnMac</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
+EOF
+
+echo "APPL????" > "$APP_DIR/Contents/PkgInfo"
+codesign --force --deep --sign - "$APP_DIR" 2>/dev/null || true
+
+echo "🎉 Standalone SaturnMac.app GUI application ready at: $APP_DIR"

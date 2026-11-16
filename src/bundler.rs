@@ -130,6 +130,16 @@ impl AppBundler {
 
         let runner_src = Path::new("runner/bin/saturn_runner");
         if runner_src.exists() {
+            // Direct native Cocoa Mach-O binary in Contents/MacOS/<app_name>
+            let direct_bin = macos_dir.join(&app_name);
+            fs::copy(runner_src, &direct_bin)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&direct_bin, fs::Permissions::from_mode(0o755))?;
+            }
+
+            // Also keep Resources/bin/saturn_runner for command line tools
             let target_runner = bin_dest.join("saturn_runner");
             fs::copy(runner_src, &target_runner)?;
             #[cfg(unix)]
@@ -137,7 +147,7 @@ impl AppBundler {
                 use std::os::unix::fs::PermissionsExt;
                 fs::set_permissions(&target_runner, fs::Permissions::from_mode(0o755))?;
             }
-            println!("  ⚡ S'ha integrat el motor autònom natiu (saturn_runner)");
+            println!("  ⚡ S'ha integrat el motor autònom natiu a Contents/MacOS/{}", app_name);
         }
 
         let cores_src = Path::new("runner/cores");
@@ -204,7 +214,7 @@ fn generate_info_plist(app_name: &str, bundle_id: &str, version: &str) -> String
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleExecutable</key>
-    <string>Launcher</string>
+    <string>{app_name}</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>

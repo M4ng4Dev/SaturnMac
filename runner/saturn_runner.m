@@ -696,9 +696,131 @@ int main(int argc, const char * argv[]) {
             if (strcmp(argv[i], "--no-smoothing") == 0) g_opt_smoothing = false;
         }
 
+        NSString *bundleRes = [[NSBundle mainBundle] resourcePath];
+
+        // 1. Auto-detect bundled game when launched directly from macOS Finder / GUI
+        if (!romPath && bundleRes) {
+            NSString *gameDir = [bundleRes stringByAppendingPathComponent:@"Game"];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:gameDir]) {
+                NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:gameDir error:nil];
+                // Search for .cue, .chd, .iso, .bin in priority order
+                for (NSString *ext in @[@"cue", @"chd", @"iso", @"bin"]) {
+                    for (NSString *f in files) {
+                        if ([[f pathExtension] caseInsensitiveCompare:ext] == NSOrderedSame) {
+                            romPath = [gameDir stringByAppendingPathComponent:f];
+                            break;
+                        }
+                    }
+                    if (romPath) break;
+                }
+            }
+        }
+
+        // 2. Read bundled JSON configuration if available
+        if (bundleRes) {
+            NSString *cfgPath = [bundleRes stringByAppendingPathComponent:@"Config/saturn.json"];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:cfgPath]) {
+                NSData *cfgData = [NSData dataWithContentsOfFile:cfgPath];
+                if (cfgData) {
+                    NSDictionary *cfg = [NSJSONSerialization JSONObjectWithData:cfgData options:0 error:nil];
+                    if (cfg) {
+                        NSDictionary *opt = cfg[@"mac_optimizations"];
+                        if (opt && opt[@"internal_resolution"]) {
+                            g_opt_resolution_scale = [opt[@"internal_resolution"] intValue];
+                        }
+                        NSDictionary *game = cfg[@"game"];
+                        if (game && game[@"title"]) {
+                            gameTitle = game[@"title"];
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback to bundle name
+        NSString *dispName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleDisplayName"];
+        if (!dispName) dispName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+        if (dispName && ![dispName isEqualToString:@"saturn_runner"] && ![dispName isEqualToString:@"Launcher"] && ![dispName isEqualToString:@"SaturnMac"]) {
+            gameTitle = dispName;
+        }
+
+        // 4. If opened as a standalone GUI application without a bundled game, present native macOS file picker
         if (!romPath) {
-            NSLog(@"Usage: saturn_runner --rom <path_to_cue_or_iso> [--core <path_to_dylib>] [--title <game_title>]");
-            return 1;
+            [NSApplication sharedApplication];
+            [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+
+            NSOpenPanel *panel = [NSOpenPanel openPanel];
+            panel.title = @"SaturnMac - Selecciona un joc de Sega Saturn";
+            panel.message = @"Tria una imatge de disc (.cue, .iso, .chd, .bin o .zip) per jugar:";
+            panel.prompt = @"Jugar";
+            panel.allowedFileTypes = @[@"cue", @"chd", @"iso", @"bin", @"zip"];
+            panel.canChooseFiles = YES;
+            panel.canChooseDirectories = NO;
+            panel.allowsMultipleSelection = NO;
+
+            if ([panel runModal] == NSModalResponseOK) {
+                romPath = [[panel URL] path];
+                gameTitle = [[[romPath lastPathComponent] stringByDeletingPathExtension] capitalizedString];
+            } else {
+                NSLog(@"[SaturnMac] No ROM selected. Exiting.");
+                return 0; // User cancelled cleanly
+            }
+        }
+
+        // 5. Handle ZIP files directly by extracting to temp directory
+        if ([[romPath pathExtension] caseInsensitiveCompare:@"zip"] == NSOrderedSame) {
+            NSString *tmpExtract = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"saturn_zip_%d", getpid()]];
+            [[NSFileManager defaultManager] createDirectoryAtPath:tmpExtract withIntermediateDirectories:YES attributes:nil error:nil];
+            NSLog(@"[SaturnMac] Extracting ZIP package to: %@", tmpExtract);
+
+            NSTask *unzipTask = [[NSTask alloc] init];
+            unzipTask.launchPath = @"/usr/bin/unzip";
+            unzipTask.arguments = @[@"-q", @"-o", romPath, @"-d", tmpExtract];
+            [unzipTask launch];
+            [unzipTask waitUntilExit];
+
+            NSArray *extracted = [[NSFileManager defaultManager] subpathsAtPath:tmpExtract];
+            for (NSString *ext in @[@"cue", @"chd", @"iso", @"bin"]) {
+                for (NSString *sub in extracted) {
+                    if ([[sub pathExtension] caseInsensitiveCompare:ext] == NSOrderedSame) {
+                        romPath = [tmpExtract stringByAppendingPathComponent:sub];
+                        break;
+                    }
+                }
+                if (![[romPath pathExtension] isEqualToString:@"zip"]) break;
+            }
+        }
+
+        // 6. Auto-convert any MP3 audio tracks to WAV if referenced in .cue
+        if ([[romPath pathExtension] caseInsensitiveCompare:@"cue"] == NSOrderedSame) {
+            NSString *cueDir = [romPath stringByDeletingLastPathComponent];
+            NSString *cueContent = [NSString stringWithContentsOfFile:romPath encoding:NSUTF8StringEncoding error:nil];
+            if (cueContent && [cueContent rangeOfString:@".mp3" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:cueDir error:nil];
+                BOOL convertedAny = NO;
+                for (NSString *f in files) {
+                    if ([[f pathExtension] caseInsensitiveCompare:@"mp3"] == NSOrderedSame) {
+                        NSString *mp3Path = [cueDir stringByAppendingPathComponent:f];
+                        NSString *wavName = [[f stringByDeletingPathExtension] stringByAppendingPathExtension:@"wav"];
+                        NSString *wavPath = [cueDir stringByAppendingPathComponent:wavName];
+                        if (![[NSFileManager defaultManager] fileExistsAtPath:wavPath]) {
+                            NSTask *afTask = [[NSTask alloc] init];
+                            afTask.launchPath = @"/usr/bin/afconvert";
+                            afTask.arguments = @[@"-f", @"WAVE", @"-d", @"LEI16@44100", mp3Path, wavPath];
+                            [afTask launch];
+                            [afTask waitUntilExit];
+                            if ([[NSFileManager defaultManager] fileExistsAtPath:wavPath]) {
+                                convertedAny = YES;
+                            }
+                        }
+                    }
+                }
+                if (convertedAny) {
+                    NSString *newCue = [cueContent stringByReplacingOccurrencesOfString:@".mp3" withString:@".wav" options:NSCaseInsensitiveSearch range:NSMakeRange(0, cueContent.length)];
+                    newCue = [newCue stringByReplacingOccurrencesOfString:@"MP3" withString:@"WAVE" options:NSCaseInsensitiveSearch range:NSMakeRange(0, newCue.length)];
+                    [newCue writeToFile:romPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                }
+            }
         }
 
         if (!corePath) {
