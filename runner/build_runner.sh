@@ -78,6 +78,10 @@ chmod +x "$APP_DIR/Contents/Resources/bin"/* 2>/dev/null || true
 # 3. Embed cores
 cp "$DIR/cores"/*.dylib "$APP_DIR/Contents/Resources/cores/" 2>/dev/null || true
 
+# 4. Embed default icons and assets
+mkdir -p "$APP_DIR/Contents/Resources"
+cp "$DIR/../assets/icons"/*.png "$APP_DIR/Contents/Resources/" 2>/dev/null || true
+
 cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -105,6 +109,11 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
 EOF

@@ -7,10 +7,225 @@ struct SaturnMacApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 840, minHeight: 620)
+                .frame(minWidth: 860, minHeight: 640)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
+    }
+}
+
+// MARK: - Internationalization (i18n)
+
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case catalan = "ca"
+    case spanish = "es"
+    case english = "en"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .catalan: return "Català"
+        case .spanish: return "Español"
+        case .english: return "English"
+        }
+    }
+}
+
+struct I18N {
+    static func t(_ key: String, lang: String) -> String {
+        let strings: [String: [String: String]] = [
+            "app_subtitle": [
+                "ca": "Portejador de jocs de Sega Saturn a aplicacions natives de Mac",
+                "es": "Portador de juegos de Sega Saturn a aplicaciones nativas de Mac",
+                "en": "Sega Saturn to native macOS application porter"
+            ],
+            "tab_port": [
+                "ca": "Portejar Joc",
+                "es": "Portear Juego",
+                "en": "Port Game"
+            ],
+            "tab_library": [
+                "ca": "Jocs Portats",
+                "es": "Juegos Porteados",
+                "en": "Ported Games"
+            ],
+            "drop_title": [
+                "ca": "Arrossega aquí el joc de Sega Saturn que vols portejar",
+                "es": "Arrastra aquí el juego de Sega Saturn que deseas portear",
+                "en": "Drag and drop the Sega Saturn game you want to port here"
+            ],
+            "drop_subtitle": [
+                "ca": "Suporta arxius comprimits .ZIP, fitxers .CUE + pistes, imatges .ISO, .CHD i .BIN",
+                "es": "Soporta archivos comprimidos .ZIP, ficheros .CUE + pistas, imágenes .ISO, .CHD y .BIN",
+                "en": "Supports compressed .ZIP files, .CUE sheets + tracks, .ISO, .CHD, and .BIN images"
+            ],
+            "select_file_btn": [
+                "ca": "Triar fitxer de joc...",
+                "es": "Seleccionar archivo de juego...",
+                "en": "Select game file..."
+            ],
+            "searching_art": [
+                "ca": "Buscant caràtula oficial...",
+                "es": "Buscando carátula oficial...",
+                "en": "Searching official box art..."
+            ],
+            "dev_label": [
+                "ca": "Desenvolupador:",
+                "es": "Desarrollador:",
+                "en": "Developer:"
+            ],
+            "release_date_label": [
+                "ca": "Data llançament:",
+                "es": "Fecha de lanzamiento:",
+                "en": "Release date:"
+            ],
+            "source_file_label": [
+                "ca": "Fitxer origen:",
+                "es": "Archivo origen:",
+                "en": "Source file:"
+            ],
+            "tracks_count": [
+                "ca": "Pistes",
+                "es": "Pistas",
+                "en": "Tracks"
+            ],
+            "config_title": [
+                "ca": "Configuració del Port per a Apple Silicon",
+                "es": "Configuración del Port para Apple Silicon",
+                "en": "Apple Silicon Port Configuration"
+            ],
+            "res_label": [
+                "ca": "Resolució interna de renderitzat (Metal / GPU):",
+                "es": "Resolución interna de renderizado (Metal / GPU):" ,
+                "en": "Internal rendering resolution (Metal / GPU):"
+            ],
+            "res_1x": [
+                "ca": "1x Nativa (240p original)",
+                "es": "1x Nativa (240p original)",
+                "en": "1x Native (240p original)"
+            ],
+            "res_2x": [
+                "ca": "2x Alta Definició (480p)",
+                "es": "2x Alta Definición (480p)",
+                "en": "2x High Definition (480p)"
+            ],
+            "res_4x": [
+                "ca": "4x Retina HD (960p) [Recomanat]",
+                "es": "4x Retina HD (960p) [Recomendado]",
+                "en": "4x Retina HD (960p) [Recommended]"
+            ],
+            "res_8x": [
+                "ca": "8x Ultra HD 4K (1920p)",
+                "es": "8x Ultra HD 4K (1920p)",
+                "en": "8x Ultra HD 4K (1920p)"
+            ],
+            "aa_toggle": [
+                "ca": "Suavitzat Anti-Aliasing (FXAA)",
+                "es": "Suavizado Anti-Aliasing (FXAA)",
+                "en": "Anti-Aliasing Smoothing (FXAA)"
+            ],
+            "dedither_toggle": [
+                "ca": "Correcció De-Dither (Transparències suaus de VDP1)",
+                "es": "Corrección De-Dither (Transparencias suaves de VDP1)",
+                "en": "De-Dither Filter (Smooth VDP1 mesh transparency)"
+            ],
+            "crt_toggle": [
+                "ca": "Filtre CRT Retro (Scanlines de fòsfor)",
+                "es": "Filtro CRT Retro (Scanlines de fósforo)",
+                "en": "Retro CRT Filter (Phosphor scanlines)"
+            ],
+            "widescreen_toggle": [
+                "ca": "Format panoràmic anamòrfic 16:9",
+                "es": "Formato panorámico anamórfico 16:9",
+                "en": "16:9 Anamorphic Widescreen mode"
+            ],
+            "output_folder_label": [
+                "ca": "Carpeta de destinació:",
+                "es": "Carpeta de destino:",
+                "en": "Destination folder:"
+            ],
+            "change_btn": [
+                "ca": "Canviar...",
+                "es": "Cambiar...",
+                "en": "Change..."
+            ],
+            "btn_test": [
+                "ca": "Provar Joc Ara",
+                "es": "Probar Juego Ahora",
+                "en": "Test Game Now"
+            ],
+            "btn_port_mac": [
+                "ca": "Portejar a Mac (.app)",
+                "es": "Portear a Mac (.app)",
+                "en": "Port to Mac (.app)"
+            ],
+            "btn_release": [
+                "ca": "Release (Mac + iOS/iPad)",
+                "es": "Release (Mac + iOS/iPad)",
+                "en": "Release (Mac + iOS/iPad)"
+            ],
+            "show_finder": [
+                "ca": "Mostrar al Finder",
+                "es": "Mostrar en Finder",
+                "en": "Show in Finder"
+            ],
+            "open_game": [
+                "ca": "Obrir Joc",
+                "es": "Abrir Juego",
+                "en": "Open Game"
+            ],
+            "play_game": [
+                "ca": "Jugar",
+                "es": "Jugar",
+                "en": "Play"
+            ],
+            "hide_logs": [
+                "ca": "Amagar registre",
+                "es": "Ocultar registro",
+                "en": "Hide logs"
+            ],
+            "show_logs": [
+                "ca": "Veure registre",
+                "es": "Ver registro",
+                "en": "Show logs"
+            ],
+            "library_title": [
+                "ca": "Jocs de Sega Saturn instal·lats al Mac",
+                "es": "Juegos de Sega Saturn instalados en el Mac",
+                "en": "Sega Saturn games installed on your Mac"
+            ],
+            "library_empty_title": [
+                "ca": "Encara no has portat cap joc de Saturn.",
+                "es": "Aún no has porteado ningún juego de Saturn.",
+                "en": "No Saturn games ported yet."
+            ],
+            "library_empty_desc": [
+                "ca": "Ves a la pestanya 'Portejar Joc' i arrossega qualsevol joc per començar!",
+                "es": "Ve a la pestaña 'Portear Juego' y arrastra cualquier juego para comenzar!",
+                "en": "Go to the 'Port Game' tab and drop any game to get started!"
+            ],
+            "refresh_btn": [
+                "ca": "Actualitzar",
+                "es": "Actualizar",
+                "en": "Refresh"
+            ],
+            "native_app_desc": [
+                "ca": "Aplicació nativa de macOS",
+                "es": "Aplicación nativa de macOS",
+                "en": "Native macOS Application"
+            ],
+            "success_ported": [
+                "ca": "Joc portat correctament a:",
+                "es": "Juego porteado correctamente en:",
+                "en": "Game successfully ported to:"
+            ]
+        ]
+
+        if let dict = strings[key], let val = dict[lang] {
+            return val
+        }
+        return strings[key]?["en"] ?? key
     }
 }
 
@@ -52,6 +267,7 @@ struct PortedApp: Identifiable {
 // MARK: - Main Content View
 
 struct ContentView: View {
+    @AppStorage("saturnmac_language") private var currentLang: String = "ca"
     @State private var selectedTab: Int = 0 // 0 = Portejar, 1 = Biblioteca
     @State private var isTargeted: Bool = false
     @State private var loadedGame: SaturnDiscMetadata? = nil
@@ -73,6 +289,10 @@ struct ContentView: View {
     @State private var generatedAppURL: URL? = nil
     @State private var showLogs: Bool = false
     @State private var portedGames: [PortedApp] = []
+
+    func t(_ key: String) -> String {
+        I18N.t(key, lang: currentLang)
+    }
 
     var body: some View {
         ZStack {
@@ -117,7 +337,7 @@ struct ContentView: View {
                         .foregroundColor(.blue)
                         .cornerRadius(4)
                 }
-                Text("Portejador de jocs de Sega Saturn a aplicacions natives de Mac")
+                Text(t("app_subtitle"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -125,11 +345,29 @@ struct ContentView: View {
             Spacer()
 
             Picker("", selection: $selectedTab) {
-                Label("Portejar Joc", systemImage: "arrow.triangle.2.circlepath.circle").tag(0)
-                Label("Jocs Portejats (\(portedGames.count))", systemImage: "square.grid.2x2").tag(1)
+                Label(t("tab_port"), systemImage: "arrow.triangle.2.circlepath.circle").tag(0)
+                Label("\(t("tab_library")) (\(portedGames.count))", systemImage: "square.grid.2x2").tag(1)
             }
             .pickerStyle(.segmented)
-            .frame(width: 320)
+            .frame(width: 300)
+
+            // Language Selector
+            Menu {
+                Button("Català") { currentLang = "ca" }
+                Button("Español") { currentLang = "es" }
+                Button("English") { currentLang = "en" }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "globe")
+                    Text(currentLang == "ca" ? "Català" : (currentLang == "es" ? "Español" : "English"))
+                        .font(.caption.bold())
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.secondary.opacity(0.12))
+                .cornerRadius(6)
+            }
+            .menuStyle(.borderlessButton)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -169,18 +407,18 @@ struct ContentView: View {
             }
 
             VStack(spacing: 6) {
-                Text("Arrossega aquí el joc de Sega Saturn que vols portejar")
+                Text(t("drop_title"))
                     .font(.title3.bold())
 
-                Text("Suporta arxius comprimits .ZIP, fitxers .CUE + pistes, imatges .ISO, .CHD i .BIN")
+                Text(t("drop_subtitle"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 500)
+                    .frame(maxWidth: 520)
             }
 
             Button(action: selectFile) {
-                Label("Triar fitxer de joc...", systemImage: "folder.badge.plus")
+                Label(t("select_file_btn"), systemImage: "folder.badge.plus")
                     .font(.headline)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -223,7 +461,7 @@ struct ContentView: View {
                 } else if isLoadingArt {
                     VStack(spacing: 8) {
                         ProgressView()
-                        Text("Buscant caràtula...")
+                        Text(t("searching_art"))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -270,7 +508,7 @@ struct ContentView: View {
                     TagBadge(text: game.regions.first ?? "Regió Desconeguda", color: .purple)
                     TagBadge(text: game.version, color: .gray)
                     if !game.tracks.isEmpty {
-                        TagBadge(text: "\(game.tracks.count) Pistes", color: .teal)
+                        TagBadge(text: "\(game.tracks.count) \(t("tracks_count"))", color: .teal)
                     }
                 }
 
@@ -278,16 +516,16 @@ struct ContentView: View {
 
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                     GridRow {
-                        Text("Desenvolupador:").font(.caption).foregroundStyle(.secondary)
+                        Text(t("dev_label")).font(.caption).foregroundStyle(.secondary)
                         Text(game.maker_id).font(.caption.bold())
                     }
                     GridRow {
-                        Text("Data llançament:").font(.caption).foregroundStyle(.secondary)
+                        Text(t("release_date_label")).font(.caption).foregroundStyle(.secondary)
                         Text(game.release_date).font(.caption)
                     }
                     if let f = game.filePath {
                         GridRow {
-                            Text("Fitxer origen:").font(.caption).foregroundStyle(.secondary)
+                            Text(t("source_file_label")).font(.caption).foregroundStyle(.secondary)
                             Text(f.lastPathComponent).font(.caption).lineLimit(1)
                         }
                     }
@@ -303,21 +541,21 @@ struct ContentView: View {
     // MARK: - Options Card
     var optionsCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Configuració del Port per a Apple Silicon")
+            Text(t("config_title"))
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 12) {
                 // Resolution
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Resolució interna de renderitzat (Metal / GPU):")
+                    Text(t("res_label"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
                     Picker("", selection: $internalResolution) {
-                        Text("1x Nativa (240p original)").tag(1)
-                        Text("2x Alta Definició (480p)").tag(2)
-                        Text("4x Retina HD (960p) [Recomanat]").tag(4)
-                        Text("8x Ultra HD 4K (1920p)").tag(8)
+                        Text(t("res_1x")).tag(1)
+                        Text(t("res_2x")).tag(2)
+                        Text(t("res_4x")).tag(4)
+                        Text(t("res_8x")).tag(8)
                     }
                     .pickerStyle(.segmented)
                 }
@@ -327,13 +565,13 @@ struct ContentView: View {
                 // Graphical enhancements toggles
                 HStack(spacing: 30) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Suavitzat Anti-Aliasing (FXAA)", isOn: $enableAntiAliasing)
-                        Toggle("Correcció De-Dither (Transparències suaus)", isOn: $enableDeDither)
+                        Toggle(t("aa_toggle"), isOn: $enableAntiAliasing)
+                        Toggle(t("dedither_toggle"), isOn: $enableDeDither)
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Filtre CRT Retro (Scanlines de fòsfor)", isOn: $enableCRTShader)
-                        Toggle("Format panoràmic anamòrfic 16:9", isOn: $enableWidescreen)
+                        Toggle(t("crt_toggle"), isOn: $enableCRTShader)
+                        Toggle(t("widescreen_toggle"), isOn: $enableWidescreen)
                     }
                 }
 
@@ -341,7 +579,7 @@ struct ContentView: View {
 
                 // Destination Folder
                 HStack {
-                    Text("Carpeta de destinació:")
+                    Text(t("output_folder_label"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -356,7 +594,7 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Button("Canviar...") {
+                    Button(t("change_btn")) {
                         selectOutputFolder()
                     }
                     .buttonStyle(.bordered)
@@ -373,7 +611,7 @@ struct ContentView: View {
         HStack(spacing: 14) {
             // Test Button
             Button(action: testGameNow) {
-                Label("Provar Joc Ara", systemImage: "play.circle")
+                Label(t("btn_test"), systemImage: "play.circle")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
@@ -382,7 +620,7 @@ struct ContentView: View {
 
             // Port to Mac .app Button
             Button(action: { portGame(mode: "bundle") }) {
-                Label("Portejar a Mac (.app)", systemImage: "macbook.and.arrow.forward")
+                Label(t("btn_port_mac"), systemImage: "macbook.and.arrow.forward")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -392,7 +630,7 @@ struct ContentView: View {
 
             // Complete Multiplatform Release Button
             Button(action: { portGame(mode: "release") }) {
-                Label("Release (Mac + iOS/iPad)", systemImage: "shippingbox")
+                Label(t("btn_release"), systemImage: "shippingbox")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -411,7 +649,7 @@ struct ContentView: View {
                     Text(currentStep).font(.subheadline.bold())
                 } else if let appURL = generatedAppURL {
                     Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                    Text("Joc portat correctament a:")
+                    Text(t("success_ported"))
                         .font(.subheadline.bold())
                     Text(appURL.lastPathComponent)
                         .font(.subheadline.bold())
@@ -419,13 +657,13 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Button("Mostrar al Finder") {
+                    Button(t("show_finder")) {
                         NSWorkspace.shared.activateFileViewerSelecting([appURL])
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
 
-                    Button("Obrir Joc") {
+                    Button(t("open_game")) {
                         NSWorkspace.shared.open(appURL)
                     }
                     .buttonStyle(.borderedProminent)
@@ -436,7 +674,7 @@ struct ContentView: View {
                 Spacer()
 
                 Button(action: { showLogs.toggle() }) {
-                    Text(showLogs ? "Amagar registre" : "Veure registre")
+                    Text(showLogs ? t("hide_logs") : t("show_logs"))
                         .font(.caption)
                 }
                 .buttonStyle(.plain)
@@ -468,11 +706,11 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text("Jocs de Sega Saturn instal·lats al Mac")
+                    Text(t("library_title"))
                         .font(.headline)
                     Spacer()
                     Button(action: refreshLibrary) {
-                        Label("Actualitzar", systemImage: "arrow.clockwise")
+                        Label(t("refresh_btn"), systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -483,9 +721,9 @@ struct ContentView: View {
                         Image(systemName: "gamecontroller.fill")
                             .font(.system(size: 40))
                             .foregroundStyle(.secondary)
-                        Text("Encara no has portat cap joc de Saturn.")
+                        Text(t("library_empty_title"))
                             .font(.headline)
-                        Text("Ves a la pestanya 'Portejar Joc' i arrossega qualsevol imatge .zip o .cue per començar!")
+                        Text(t("library_empty_desc"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -523,14 +761,14 @@ struct ContentView: View {
                     .lineLimit(1)
                     .multilineTextAlignment(.center)
 
-                Text("Aplicació nativa de macOS")
+                Text(t("native_app_desc"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 10) {
                 Button(action: { NSWorkspace.shared.open(game.url) }) {
-                    Label("Jugar", systemImage: "play.fill")
+                    Label(t("play_game"), systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -552,7 +790,7 @@ struct ContentView: View {
 
     func selectFile() {
         let panel = NSOpenPanel()
-        panel.title = "Selecciona un joc de Sega Saturn"
+        panel.title = t("select_file_btn")
         panel.allowedContentTypes = [
             UTType(filenameExtension: "cue")!,
             UTType(filenameExtension: "zip")!,
@@ -568,7 +806,7 @@ struct ContentView: View {
 
     func selectOutputFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Selecciona la carpeta on desar els jocs portats"
+        panel.title = t("output_folder_label")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
@@ -581,9 +819,8 @@ struct ContentView: View {
     func processSelectedROM(_ url: URL) {
         logLines.removeAll()
         generatedAppURL = nil
-        appendLog("🔍 Analitzant imatge de disc: \(url.lastPathComponent)...")
+        appendLog("🔍 Analitzant disc: \(url.lastPathComponent)...")
 
-        // Try using saturnmac inspect --json CLI
         DispatchQueue.global(qos: .userInitiated).async {
             var meta = SaturnDiscMetadata()
             meta.filePath = url
@@ -595,7 +832,7 @@ struct ContentView: View {
                 .replacingOccurrences(of: "(Japan)", with: "")
                 .trimmingCharacters(in: .whitespaces)
 
-            meta.title = cleanName.uppercased()
+            meta.title = cleanName
 
             if let saturnmacBin = findBinary("saturnmac") {
                 let proc = Process()
@@ -614,46 +851,87 @@ struct ContentView: View {
                         meta.filePath = url
                     }
                 } catch {
-                    self.appendLog("⚠️ Avís en la inspecció via CLI, s'utilitzarà el nom de fitxer.")
+                    self.appendLog("⚠️ CLI inspection fallback to filename.")
                 }
             }
 
             DispatchQueue.main.async {
                 self.loadedGame = meta
-                self.fetchCoverArt(title: meta.title, regions: meta.regions)
+                self.fetchCoverArt(title: meta.title, productId: meta.product_id, regions: meta.regions)
             }
         }
     }
 
-    func fetchCoverArt(title: String, regions: [String]) {
+    func fetchCoverArt(title: String, productId: String, regions: [String]) {
         self.isLoadingArt = true
         self.coverImage = nil
 
-        let candidates = [
-            "\(title) (USA, Brazil).png",
-            "\(title) (USA).png",
-            "\(title) (Europe).png",
-            "\(title) (Japan).png",
-            "\(title).png"
-        ]
+        // 1. Check embedded local assets first
+        let titleUpper = title.uppercased()
+        let prodUpper = productId.uppercased()
+
+        if titleUpper.contains("SONIC R") || prodUpper.contains("MK-81800") || prodUpper.contains("GS-9170") {
+            if let localSonic = loadLocalAsset("sonic_r.png") {
+                self.coverImage = localSonic
+                self.isLoadingArt = false
+                appendLog("🎨 Caràtula de Sonic R carregada des d'actius integrats.")
+                return
+            }
+        }
+
+        // 2. Perform online download with title-casing and HTTPS
+        let formattedTitle = titleCase(title)
+        var candidates: [String] = []
+
+        let regStr = regions.joined(separator: " ").uppercased()
+        if regStr.contains("E") || regStr.contains("EUROPE") {
+            candidates.append("\(formattedTitle) (Europe).png")
+        } else if regStr.contains("J") || regStr.contains("JAPAN") {
+            candidates.append("\(formattedTitle) (Japan).png")
+            candidates.append("\(formattedTitle) (Japan) (1M).png")
+        } else {
+            candidates.append("\(formattedTitle) (USA, Brazil).png")
+            candidates.append("\(formattedTitle) (USA).png")
+        }
+
+        candidates.append("\(formattedTitle) (USA, Brazil).png")
+        candidates.append("\(formattedTitle) (USA).png")
+        candidates.append("\(formattedTitle) (Europe).png")
+        candidates.append("\(formattedTitle) (Japan).png")
+        candidates.append("\(formattedTitle).png")
 
         DispatchQueue.global(qos: .userInitiated).async {
             for cand in candidates {
                 guard let encoded = cand.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { continue }
-                let urlString = "http://thumbnails.libretro.com/Sega%20-%20Saturn/Named_Boxarts/\(encoded)"
-                if let u = URL(string: urlString), let data = try? Data(contentsOf: u), let img = NSImage(data: data) {
+
+                // Try HTTPS GitHub Raw (bypasses macOS ATS restrictions)
+                let httpsURL = "https://raw.githubusercontent.com/libretro-thumbnails/Sega_-_Saturn/master/Named_Boxarts/\(encoded)"
+                if let img = downloadImageDirect(httpsURL) {
                     DispatchQueue.main.async {
                         self.coverImage = img
                         self.isLoadingArt = false
-                        self.appendLog("🎨 S'ha trobat la caràtula oficial per a \(title) a la base de dades.")
+                        self.appendLog("🎨 Caràtula oficial trobada a Libretro: \(cand)")
+                    }
+                    return
+                }
+
+                // Fallback to HTTP Libretro thumbnails
+                let httpURL = "http://thumbnails.libretro.com/Sega%20-%20Saturn/Named_Boxarts/\(encoded)"
+                if let img = downloadImageDirect(httpURL) {
+                    DispatchQueue.main.async {
+                        self.coverImage = img
+                        self.isLoadingArt = false
+                        self.appendLog("🎨 Caràtula oficial trobada a Libretro: \(cand)")
                     }
                     return
                 }
             }
 
+            // Fallback to local default Saturn art
             DispatchQueue.main.async {
+                self.coverImage = loadLocalAsset("saturn_default.png")
                 self.isLoadingArt = false
-                self.appendLog("ℹ️ Caràtula online no disponible, s'utilitzarà la icona oficial integrada d'alta resolució.")
+                self.appendLog("ℹ️ S'ha assignat la icona oficial integrada de Sega Saturn.")
             }
         }
     }
@@ -669,7 +947,7 @@ struct ContentView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             guard let saturnmacBin = findBinary("saturnmac") else {
                 DispatchQueue.main.async {
-                    self.appendLog("❌ No s'ha trobat l'executable saturnmac. Executa 'cargo run -- setup-runner' al terminal.")
+                    self.appendLog("❌ No s'ha trobat l'executable saturnmac.")
                     self.isProcessing = false
                 }
                 return
@@ -720,13 +998,13 @@ struct ContentView: View {
                         self.appendLog("🎉 Joc portat amb èxit a: \(appPath.path)")
                         self.refreshLibrary()
                     } else {
-                        self.appendLog("❌ S'ha produït un error durant la generació (Codi: \(proc.terminationStatus))")
+                        self.appendLog("❌ S'ha produït un error (Codi: \(proc.terminationStatus))")
                     }
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.isProcessing = false
-                    self.appendLog("❌ Error executant saturnmac: \(error.localizedDescription)")
+                    self.appendLog("❌ Error: \(error.localizedDescription)")
                 }
             }
         }
@@ -734,12 +1012,12 @@ struct ContentView: View {
 
     func testGameNow() {
         guard let game = loadedGame, let romURL = game.filePath else { return }
-        appendLog("▶️ Iniciant prova directa de \"\(game.title)\" en finestra nativa...")
+        appendLog("▶️ Iniciant prova de \"\(game.title)\" en finestra nativa...")
 
         DispatchQueue.global(qos: .userInitiated).async {
             guard let runnerBin = findBinary("saturn_runner") else {
                 DispatchQueue.main.async {
-                    self.appendLog("❌ No s'ha trobat saturn_runner. Executa 'cargo run -- setup-runner'.")
+                    self.appendLog("❌ No s'ha trobat saturn_runner.")
                 }
                 return
             }
@@ -820,19 +1098,76 @@ struct VisualEffectView: NSViewRepresentable {
 
 // MARK: - Helpers
 
+func titleCase(_ s: String) -> String {
+    let clean = s.replacingOccurrences(of: "\0", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let words = clean.components(separatedBy: .whitespaces)
+    let cased = words.map { w -> String in
+        if w.count <= 2 && w.allSatisfy({ $0.isLetter }) {
+            return w.uppercased()
+        }
+        return w.prefix(1).uppercased() + w.dropFirst().lowercased()
+    }
+    return cased.joined(separator: " ")
+}
+
 func sanitizeFilename(_ s: String) -> String {
     let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " -_"))
     return String(s.unicodeScalars.filter { allowed.contains($0) }).trimmingCharacters(in: .whitespaces)
 }
 
+func loadLocalAsset(_ name: String) -> NSImage? {
+    if let bundleURL = Bundle.main.resourceURL?.appendingPathComponent(name),
+       let img = NSImage(contentsOf: bundleURL) {
+        return img
+    }
+
+    let home = NSHomeDirectory()
+    let candidates = [
+        "\(home)/Documents/SaturnMac/assets/icons/\(name)",
+        "assets/icons/\(name)",
+        "../assets/icons/\(name)"
+    ]
+
+    for c in candidates {
+        if let img = NSImage(contentsOfFile: c) {
+            return img
+        }
+    }
+    return nil
+}
+
+func downloadImageDirect(_ urlString: String) -> NSImage? {
+    // 1. Try URLSession data
+    if let url = URL(string: urlString),
+       let data = try? Data(contentsOf: url),
+       data.count > 1024,
+       let img = NSImage(data: data) {
+        return img
+    }
+
+    // 2. Fallback to /usr/bin/curl (immune to App Transport Security HTTP blocks)
+    let tmpFile = NSTemporaryDirectory().appending("cover_\(UUID().uuidString).png")
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+    proc.arguments = ["-sL", "--max-time", "8", urlString, "-o", tmpFile]
+    do {
+        try proc.run()
+        proc.waitUntilExit()
+        if proc.terminationStatus == 0, let d = try? Data(contentsOf: URL(fileURLWithPath: tmpFile)), d.count > 1024 {
+            try? FileManager.default.removeItem(atPath: tmpFile)
+            return NSImage(data: d)
+        }
+    } catch {}
+    try? FileManager.default.removeItem(atPath: tmpFile)
+    return nil
+}
+
 func findBinary(_ name: String) -> String? {
-    // Check inside .app bundle
     if let bundleBin = Bundle.main.resourceURL?.appendingPathComponent("bin/\(name)").path,
        FileManager.default.isExecutableFile(atPath: bundleBin) {
         return bundleBin
     }
 
-    // Check project paths
     let current = FileManager.default.currentDirectoryPath
     let home = NSHomeDirectory()
     let candidates = [
