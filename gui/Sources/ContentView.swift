@@ -641,7 +641,13 @@ struct ContentView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(similarCandidates.prefix(8)) { cand in
-                                candidateMiniCard(cand)
+                                CoverMiniCard(
+                                    cand: cand,
+                                    isSelected: selectedCoverFilename == cand.filename,
+                                    thumbnail: candidateThumbnails[cand.filename],
+                                    onAppearThumb: { fetchThumbnailForCandidate(cand) },
+                                    onSelect: { selectCandidate(cand) }
+                                )
                             }
                         }
                         .padding(.vertical, 4)
@@ -651,56 +657,6 @@ struct ContentView: View {
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.secondary.opacity(0.06)))
-    }
-
-    // Mini candidate box art card
-    func candidateMiniCard(_ cand: CoverCandidate) -> some View {
-        let isSelected = selectedCoverFilename == cand.filename
-        return Button(action: {
-            selectCandidate(cand)
-        }) {
-            VStack(spacing: 4) {
-                ZStack(alignment: .topTrailing) {
-                    if let thumb = candidateThumbnails[cand.filename] {
-                        Image(nsImage: thumb)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 58, height: 78)
-                            .cornerRadius(6)
-                            .shadow(radius: 2)
-                    } else {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.secondary.opacity(0.12))
-                            .frame(width: 58, height: 78)
-                            .overlay(ProgressView().scaleEffect(0.6))
-                            .onAppear {
-                                fetchThumbnailForCandidate(cand)
-                            }
-                    }
-
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .background(Circle().fill(Color.white).padding(1))
-                            .offset(x: 4, y: -4)
-                    }
-                }
-
-                Text(cand.displayName)
-                    .font(.system(size: 9))
-                    .lineLimit(2)
-                    .frame(width: 66)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(isSelected ? Color.blue : Color.primary)
-            }
-            .padding(4)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
-                    .background(isSelected ? Color.blue.opacity(0.08) : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Options Card
@@ -1015,52 +971,17 @@ struct ContentView: View {
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 145), spacing: 14)], spacing: 14) {
                         ForEach(list) { cand in
-                            VStack(spacing: 6) {
-                                ZStack(alignment: .topTrailing) {
-                                    if let thumb = candidateThumbnails[cand.filename] {
-                                        Image(nsImage: thumb)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 100, height: 135)
-                                            .cornerRadius(8)
-                                            .shadow(radius: 2)
-                                    } else {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.secondary.opacity(0.12))
-                                            .frame(width: 100, height: 135)
-                                            .overlay(ProgressView().scaleEffect(0.7))
-                                            .onAppear {
-                                                fetchThumbnailForCandidate(cand)
-                                            }
-                                    }
-
-                                    if selectedCoverFilename == cand.filename {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .font(.title3)
-                                            .foregroundColor(.green)
-                                            .background(Circle().fill(Color.white).padding(2))
-                                            .offset(x: 4, y: -4)
-                                    }
-                                }
-
-                                Text(cand.displayName)
-                                    .font(.system(size: 10))
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.center)
-                                    .frame(width: 110)
-
-                                Button(selectedCoverFilename == cand.filename ? t("active_icon_badge") : t("select_this_art")) {
+                            CoverGridCard(
+                                cand: cand,
+                                isSelected: selectedCoverFilename == cand.filename,
+                                thumbnail: candidateThumbnails[cand.filename],
+                                activeLabel: t("active_icon_badge"),
+                                selectLabel: t("select_this_art"),
+                                onAppearThumb: { fetchThumbnailForCandidate(cand) },
+                                onSelect: {
                                     selectCandidate(cand)
                                     showCoverPicker = false
                                 }
-                                .buttonStyle(selectedCoverFilename == cand.filename ? .borderedProminent : .bordered)
-                                .controlSize(.mini)
-                                .tint(selectedCoverFilename == cand.filename ? .green : .blue)
-                            }
-                            .padding(8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(selectedCoverFilename == cand.filename ? Color.blue.opacity(0.12) : Color.secondary.opacity(0.04))
                             )
                         }
                     }
@@ -1473,6 +1394,128 @@ struct VisualEffectView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+struct CoverMiniCard: View {
+    let cand: CoverCandidate
+    let isSelected: Bool
+    let thumbnail: NSImage?
+    let onAppearThumb: () -> Void
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(spacing: 4) {
+                ZStack(alignment: .topTrailing) {
+                    if let thumb = thumbnail {
+                        Image(nsImage: thumb)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 58, height: 78)
+                            .cornerRadius(6)
+                            .shadow(radius: 2)
+                    } else {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.secondary.opacity(0.12))
+                            .frame(width: 58, height: 78)
+                            .overlay(ProgressView().scaleEffect(0.6))
+                            .onAppear {
+                                onAppearThumb()
+                            }
+                    }
+
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .background(Circle().fill(Color.white).padding(1))
+                            .offset(x: 4, y: -4)
+                    }
+                }
+
+                Text(cand.displayName)
+                    .font(.system(size: 9))
+                    .lineLimit(2)
+                    .frame(width: 66)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(isSelected ? Color.blue : Color.primary)
+            }
+            .padding(4)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                    .background(isSelected ? Color.blue.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct CoverGridCard: View {
+    let cand: CoverCandidate
+    let isSelected: Bool
+    let thumbnail: NSImage?
+    let activeLabel: String
+    let selectLabel: String
+    let onAppearThumb: () -> Void
+    let onSelect: () -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                if let thumb = thumbnail {
+                    Image(nsImage: thumb)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 100, height: 135)
+                        .cornerRadius(8)
+                        .shadow(radius: 2)
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.12))
+                        .frame(width: 100, height: 135)
+                        .overlay(ProgressView().scaleEffect(0.7))
+                        .onAppear {
+                            onAppearThumb()
+                        }
+                }
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.green)
+                        .background(Circle().fill(Color.white).padding(2))
+                        .offset(x: 4, y: -4)
+                }
+            }
+
+            Text(cand.displayName)
+                .font(.system(size: 10))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(width: 110)
+
+            if isSelected {
+                Button(action: onSelect) {
+                    Text(activeLabel)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .controlSize(.mini)
+            } else {
+                Button(action: onSelect) {
+                    Text(selectLabel)
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+                .controlSize(.mini)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isSelected ? Color.blue.opacity(0.12) : Color.secondary.opacity(0.04))
+        )
+    }
 }
 
 // MARK: - Helpers & Search
