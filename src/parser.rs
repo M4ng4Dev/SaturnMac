@@ -42,14 +42,15 @@ impl SaturnDiscParser {
             .unwrap_or("")
             .to_lowercase();
 
+        if crate::archive::ArchiveExtractor::is_archive(path) {
+            let temp_dir = crate::archive::ArchiveExtractor::extract_archive(path)?;
+            let primary = crate::archive::ArchiveExtractor::find_primary_rom(&temp_dir)?;
+            let info = Self::parse(&primary);
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return info;
+        }
+
         match ext.as_str() {
-            "zip" => {
-                let temp_dir = crate::archive::ZipExtractor::extract_zip(path)?;
-                let primary = crate::archive::ZipExtractor::find_primary_rom(&temp_dir)?;
-                let info = Self::parse(&primary);
-                let _ = std::fs::remove_dir_all(&temp_dir);
-                info
-            }
             "cue" => Self::parse_cue(path),
             "bin" | "iso" | "img" => Self::parse_binary_disc(path, None),
             _ => {

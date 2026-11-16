@@ -7,7 +7,7 @@ mod release;
 mod scraper;
 
 use anyhow::{Context, Result};
-use archive::ZipExtractor;
+use archive::ArchiveExtractor;
 use bundler::{AppBundleOptions, AppBundler};
 use clap::{Parser, Subcommand};
 use parser::SaturnDiscParser;
@@ -164,11 +164,11 @@ fn main() -> Result<()> {
         }
 
         Commands::Inspect { path, json } => {
-            let is_zip = path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
-            let (target_rom, temp_cleanup) = if is_zip {
-                println!("📦 S'ha detectat un arxiu ZIP. Descomprimint per a la inspecció: {}", path.display());
-                let temp_dir = ZipExtractor::extract_zip(&path)?;
-                let primary = ZipExtractor::find_primary_rom(&temp_dir)?;
+            let is_archive = ArchiveExtractor::is_archive(&path);
+            let (target_rom, temp_cleanup) = if is_archive {
+                println!("📦 S'ha detectat un arxiu comprimit: {}", path.display());
+                let temp_dir = ArchiveExtractor::extract_archive(&path)?;
+                let primary = ArchiveExtractor::find_primary_rom(&temp_dir)?;
                 (primary, Some(temp_dir))
             } else {
                 (path.clone(), None)
@@ -213,11 +213,11 @@ fn main() -> Result<()> {
             crt,
             widescreen,
         } => {
-            let is_zip = path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
-            let (target_rom, temp_cleanup) = if is_zip {
-                println!("📦 S'ha detectat un arxiu ZIP amb múltiples fitxers. Descomprimint: {}", path.display());
-                let temp_dir = ZipExtractor::extract_zip(&path)?;
-                let primary = ZipExtractor::find_primary_rom(&temp_dir)?;
+            let is_archive = ArchiveExtractor::is_archive(&path);
+            let (target_rom, temp_cleanup) = if is_archive {
+                println!("📦 S'ha detectat un arxiu comprimit amb múltiples fitxers: {}", path.display());
+                let temp_dir = ArchiveExtractor::extract_archive(&path)?;
+                let primary = ArchiveExtractor::find_primary_rom(&temp_dir)?;
                 println!("  🎯 S'ha localitzat la imatge principal del joc: {}", primary.file_name().unwrap_or_default().to_string_lossy());
                 (primary, Some(temp_dir))
             } else {
@@ -258,11 +258,11 @@ fn main() -> Result<()> {
             crt,
             widescreen,
         } => {
-            let is_zip = path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
-            let (target_rom, temp_cleanup) = if is_zip {
-                println!("📦 S'ha detectat un arxiu ZIP. Descomprimint per a la release: {}", path.display());
-                let temp_dir = ZipExtractor::extract_zip(&path)?;
-                let primary = ZipExtractor::find_primary_rom(&temp_dir)?;
+            let is_archive = ArchiveExtractor::is_archive(&path);
+            let (target_rom, temp_cleanup) = if is_archive {
+                println!("📦 S'ha detectat un arxiu comprimit: {}", path.display());
+                let temp_dir = ArchiveExtractor::extract_archive(&path)?;
+                let primary = ArchiveExtractor::find_primary_rom(&temp_dir)?;
                 println!("  🎯 S'ha localitzat la imatge principal del joc: {}", primary.file_name().unwrap_or_default().to_string_lossy());
                 (primary, Some(temp_dir))
             } else {

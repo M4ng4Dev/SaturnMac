@@ -56,9 +56,9 @@ struct I18N {
                 "en": "Drag and drop the Sega Saturn game you want to port here"
             ],
             "drop_subtitle": [
-                "ca": "Suporta arxius comprimits .ZIP, fitxers .CUE + pistes, imatges .ISO, .CHD i .BIN",
-                "es": "Soporta archivos comprimidos .ZIP, ficheros .CUE + pistas, imágenes .ISO, .CHD y .BIN",
-                "en": "Supports compressed .ZIP files, .CUE sheets + tracks, .ISO, .CHD, and .BIN images"
+                "ca": "Suporta arxius comprimits (.ZIP, .RAR, .7Z), fitxers .CUE + pistes, imatges .ISO, .CHD i .BIN",
+                "es": "Soporta archivos comprimidos (.ZIP, .RAR, .7Z), ficheros .CUE + pistas, imágenes .ISO, .CHD y .BIN",
+                "en": "Supports compressed archives (.ZIP, .RAR, .7Z), .CUE sheets + tracks, .ISO, .CHD, and .BIN images"
             ],
             "select_file_btn": [
                 "ca": "Triar fitxer de joc...",
@@ -1005,7 +1005,9 @@ struct ContentView: View {
             UTType(filenameExtension: "iso") ?? .data,
             UTType(filenameExtension: "chd") ?? .data,
             UTType(filenameExtension: "bin") ?? .data,
-            UTType(filenameExtension: "zip") ?? .zip
+            UTType(filenameExtension: "zip") ?? .zip,
+            UTType(filenameExtension: "rar") ?? .data,
+            UTType(filenameExtension: "7z") ?? .data
         ]
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
@@ -1051,7 +1053,13 @@ struct ContentView: View {
         customSearchResults.removeAll()
         coverSearchText = ""
         selectedCoverFilename = ""
-        appendLog("🔍 Analitzant disc: \(url.lastPathComponent)...")
+
+        let ext = url.pathExtension.lowercased()
+        if ext == "zip" || ext == "rar" || ext == "7z" {
+            appendLog("📦 S'ha detectat un paquet comprimit \(ext.uppercased()): \(url.lastPathComponent)")
+        } else {
+            appendLog("🔍 Analitzant disc: \(url.lastPathComponent)...")
+        }
 
         DispatchQueue.global(qos: .userInitiated).async {
             var meta = SaturnDiscMetadata()
