@@ -80,6 +80,7 @@ cp "$DIR/cores"/*.dylib "$APP_DIR/Contents/Resources/cores/" 2>/dev/null || true
 
 # 4. Embed default icons and assets
 mkdir -p "$APP_DIR/Contents/Resources"
+cp "$DIR/../assets/icons/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns" 2>/dev/null || true
 cp "$DIR/../assets/icons"/*.png "$APP_DIR/Contents/Resources/" 2>/dev/null || true
 cp "$DIR/../assets/saturn_titles.txt" "$APP_DIR/Contents/Resources/" 2>/dev/null || true
 
