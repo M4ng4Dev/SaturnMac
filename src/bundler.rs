@@ -122,17 +122,19 @@ impl AppBundler {
         }))?;
         fs::write(config_dir.join("saturn.json"), config_json)?;
 
-        // 6. Embed native Apple Silicon runner and cores if available
+        // 6. Embed native Apple Silicon runner and cores
         let bin_dest = resources_dir.join("bin");
         let cores_dest = resources_dir.join("cores");
         fs::create_dir_all(&bin_dest)?;
         fs::create_dir_all(&cores_dest)?;
 
-        let runner_src = Path::new("runner/bin/saturn_runner");
-        if runner_src.exists() {
+        let direct_bin = macos_dir.join(&app_name);
+        let launcher_path = macos_dir.join("Launcher");
+        let launcher_script = generate_launcher_script(&app_name, info, options);
+
+        if let Some(runner_src) = find_runner_binary() {
             // Direct native Cocoa Mach-O binary in Contents/MacOS/<app_name>
-            let direct_bin = macos_dir.join(&app_name);
-            fs::copy(runner_src, &direct_bin)?;
+            fs::copy(&runner_src, &direct_bin)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -141,48 +143,142 @@ impl AppBundler {
 
             // Also keep Resources/bin/saturn_runner for command line tools
             let target_runner = bin_dest.join("saturn_runner");
-            fs::copy(runner_src, &target_runner)?;
+            fs::copy(&runner_src, &target_runner)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 fs::set_permissions(&target_runner, fs::Permissions::from_mode(0o755))?;
             }
             println!("  ⚡ S'ha integrat el motor autònom natiu a Contents/MacOS/{}", app_name);
-        }
-
-        let cores_src = Path::new("runner/cores");
-        if cores_src.exists() {
-            if let Ok(entries) = fs::read_dir(cores_src) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.is_file() {
-                        let name = entry.file_name();
-                        fs::copy(&p, cores_dest.join(&name))?;
-                        println!("  🎮 S'ha integrat el nucli de Saturn: {}", name.to_string_lossy());
-                    }
-                }
+        } else {
+            // Fallback: Write launcher script as primary binary if runner Mach-O is not compiled
+            fs::write(&direct_bin, &launcher_script)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&direct_bin, fs::Permissions::from_mode(0o755))?;
             }
+            println!("  ⚠️ S'ha generat Launcher a Contents/MacOS/{}", app_name);
         }
 
-        // 7. Generate the native macOS Launcher
-        let launcher_path = macos_dir.join("Launcher");
-        let launcher_script = generate_launcher_script(&app_name, info, options);
+        // Always write Launcher script
         fs::write(&launcher_path, launcher_script)?;
-
-        // Make Launcher executable (permissions 0755)
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
         }
 
-        // Sign bundle ad-hoc for Apple Silicon (ARM64 requirement)
-        let _ = std::process::Command::new("codesign")
-            .args(["--force", "--deep", "--sign", "-", bundle_root.to_str().unwrap_or("")])
-            .status();
+        // Copy cores
+        if let Some(cores_src) = find_cores_dir() {
+            if let Ok(entries) = fs::read_dir(&cores_src) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        let name = entry.file_name();
+                        let target_dylib = cores_dest.join(&name);
+                        fs::copy(&p, &target_dylib)?;
+                        #[cfg(unix)]
+                        {
+                            let _ = std::process::Command::new("codesign")
+                                .args(["--force", "--sign", "-", target_dylib.to_str().unwrap_or("")])
+                                .status();
+                        }
+                        println!("  🎮 S'ha integrat el nucli de Saturn: {}", name.to_string_lossy());
+                    }
+                }
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Ensure all binaries inside MacOS directory are executable
+            if let Ok(entries) = fs::read_dir(&macos_dir) {
+                for entry in entries.flatten() {
+                    let _ = fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o755));
+                }
+            }
+
+            // 1. Remove quarantine attributes so Gatekeeper doesn't show "está dañada o incompleta"
+            let _ = std::process::Command::new("xattr")
+                .args(["-cr", bundle_root.to_str().unwrap_or("")])
+                .status();
+
+            // 2. Deep sign bundle ad-hoc for Apple Silicon (ARM64 requirement)
+            let _ = std::process::Command::new("codesign")
+                .args(["--force", "--deep", "--sign", "-", bundle_root.to_str().unwrap_or("")])
+                .status();
+        }
 
         Ok(bundle_root)
     }
+}
+
+fn find_runner_binary() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    // 1. Check relative to current saturnmac executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("saturn_runner"));
+            candidates.push(exe_dir.join("../../../runner/bin/saturn_runner"));
+            candidates.push(exe_dir.join("../../Resources/bin/saturn_runner"));
+            candidates.push(exe_dir.join("../Resources/bin/saturn_runner"));
+        }
+    }
+
+    // 2. Check relative to current working directory
+    candidates.push(PathBuf::from("runner/bin/saturn_runner"));
+    candidates.push(PathBuf::from("../runner/bin/saturn_runner"));
+    candidates.push(PathBuf::from("dist/SaturnMac.app/Contents/Resources/bin/saturn_runner"));
+
+    // 3. Check user home directory paths
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(PathBuf::from(&home).join("Documents/SaturnMac/runner/bin/saturn_runner"));
+        candidates.push(PathBuf::from(&home).join("Documents/SaturnMac/dist/SaturnMac.app/Contents/Resources/bin/saturn_runner"));
+        candidates.push(PathBuf::from(&home).join("Applications/SaturnMac.app/Contents/Resources/bin/saturn_runner"));
+    }
+    candidates.push(PathBuf::from("/Applications/SaturnMac.app/Contents/Resources/bin/saturn_runner"));
+
+    for c in candidates {
+        if c.exists() && c.is_file() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+fn find_cores_dir() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("cores"));
+            candidates.push(exe_dir.join("../cores"));
+            candidates.push(exe_dir.join("../../Resources/cores"));
+            candidates.push(exe_dir.join("../Resources/cores"));
+            candidates.push(exe_dir.join("../../../runner/cores"));
+        }
+    }
+
+    candidates.push(PathBuf::from("runner/cores"));
+    candidates.push(PathBuf::from("../runner/cores"));
+    candidates.push(PathBuf::from("dist/SaturnMac.app/Contents/Resources/cores"));
+
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(PathBuf::from(&home).join("Documents/SaturnMac/runner/cores"));
+        candidates.push(PathBuf::from(&home).join("Documents/SaturnMac/dist/SaturnMac.app/Contents/Resources/cores"));
+        candidates.push(PathBuf::from(&home).join("Applications/SaturnMac.app/Contents/Resources/cores"));
+    }
+    candidates.push(PathBuf::from("/Applications/SaturnMac.app/Contents/Resources/cores"));
+
+    for c in candidates {
+        if c.exists() && c.is_dir() {
+            return Some(c);
+        }
+    }
+    None
 }
 
 fn sanitize_filename(name: &str) -> String {

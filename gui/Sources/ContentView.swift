@@ -785,6 +785,11 @@ struct ContentView: View {
                     .controlSize(.small)
 
                     Button(t("open_game")) {
+                        let xattr = Process()
+                        xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+                        xattr.arguments = ["-cr", appURL.path]
+                        try? xattr.run()
+                        xattr.waitUntilExit()
                         NSWorkspace.shared.open(appURL)
                     }
                     .buttonStyle(.borderedProminent)
@@ -887,6 +892,11 @@ struct ContentView: View {
 
             HStack(spacing: 8) {
                 Button(action: {
+                    let xattr = Process()
+                    xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+                    xattr.arguments = ["-cr", game.url.path]
+                    try? xattr.run()
+                    xattr.waitUntilExit()
                     NSWorkspace.shared.open(game.url)
                 }) {
                     Label(t("play_game"), systemImage: "play.fill")
@@ -1263,6 +1273,12 @@ struct ContentView: View {
             proc.executableURL = URL(fileURLWithPath: saturnmacBin)
             proc.arguments = args
 
+            let home = NSHomeDirectory()
+            let projectDir = URL(fileURLWithPath: "\(home)/Documents/SaturnMac")
+            if FileManager.default.fileExists(atPath: projectDir.path) {
+                proc.currentDirectoryURL = projectDir
+            }
+
             let pipe = Pipe()
             proc.standardOutput = pipe
             proc.standardError = pipe
@@ -1292,6 +1308,21 @@ struct ContentView: View {
                     if proc.terminationStatus == 0 {
                         let cleanName = sanitizeFilename(game.title)
                         let appPath = outputDirectory.appendingPathComponent("\(cleanName).app")
+
+                        // Clear quarantine attributes to prevent macOS "dañada o incompleta" message
+                        let xattrProc = Process()
+                        xattrProc.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+                        xattrProc.arguments = ["-cr", appPath.path]
+                        try? xattrProc.run()
+                        xattrProc.waitUntilExit()
+
+                        // Ad-hoc sign deep
+                        let signProc = Process()
+                        signProc.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+                        signProc.arguments = ["--force", "--deep", "--sign", "-", appPath.path]
+                        try? signProc.run()
+                        signProc.waitUntilExit()
+
                         self.generatedAppURL = appPath
                         self.appendLog("🎉 Joc portat amb èxit a: \(appPath.path)")
                         self.refreshLibrary()
