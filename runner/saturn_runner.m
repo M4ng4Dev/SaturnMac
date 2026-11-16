@@ -54,6 +54,7 @@ static uint16_t g_gamepad_buttons = 0;
 
 // Graphic Enhancement Options
 static bool g_opt_dedither = true;
+static bool g_opt_smoothing = true;
 static int g_opt_resolution_scale = 4;
 static double g_audio_sample_rate = 44100.0;
 static char g_saturn_dir[1024] = {0};
@@ -135,7 +136,16 @@ static bool core_environment(unsigned cmd, void *data) {
                 var->value = "4";
                 return true;
             } else if (strcmp(var->key, "yabasanshiro_resolution") == 0 || strcmp(var->key, "yabause_resolution") == 0) {
-                var->value = (g_opt_resolution_scale >= 4) ? "4x" : ((g_opt_resolution_scale >= 2) ? "2x" : "1x");
+                if (g_opt_resolution_scale >= 8) {
+                    var->value = "8x";
+                } else if (g_opt_resolution_scale >= 4) {
+                    var->value = "4x";
+                } else if (g_opt_resolution_scale >= 2) {
+                    var->value = "2x";
+                } else {
+                    var->value = "1x";
+                }
+                NSLog(@"[SaturnMac] Core internal resolution configured: %s (scale=%d)", var->value, g_opt_resolution_scale);
                 return true;
             } else if (strcmp(var->key, "beetle_saturn_mupen_dithering") == 0) {
                 var->value = "disabled";
@@ -151,24 +161,87 @@ static bool core_environment(unsigned cmd, void *data) {
     }
 }
 
-// Intelligent De-Dither filter
-static void apply_dedither_filter(uint32_t *pixels, unsigned width, unsigned height) {
-    if (!g_opt_dedither || width < 2 || height < 2) return;
+static inline int color_dist_rgb(uint32_t c1, uint32_t c2) {
+    int r1 = c1 & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = (c1 >> 16) & 0xFF;
+    int r2 = c2 & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = (c2 >> 16) & 0xFF;
+    return abs(r1 - r2) + abs(g1 - g2) + abs(b1 - b2);
+}
 
-    for (unsigned y = 0; y < height; ++y) {
-        for (unsigned x = 0; x < width - 1; ++x) {
-            uint32_t p0 = pixels[y * width + x];
-            uint32_t p1 = pixels[y * width + x + 1];
+static inline uint32_t blend_2_pixels(uint32_t c1, uint32_t c2, float w2) {
+    float w1 = 1.0f - w2;
+    int r = (int)((c1 & 0xFF) * w1 + (c2 & 0xFF) * w2);
+    int g = (int)(((c1 >> 8) & 0xFF) * w1 + ((c2 >> 8) & 0xFF) * w2);
+    int b = (int)(((c1 >> 16) & 0xFF) * w1 + ((c2 >> 16) & 0xFF) * w2);
+    return (0xFF << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+}
 
-            uint8_t r0 = p0 & 0xFF, g0 = (p0 >> 8) & 0xFF, b0 = (p0 >> 16) & 0xFF;
-            uint8_t r1 = p1 & 0xFF, g1 = (p1 >> 8) & 0xFF, b1 = (p1 >> 16) & 0xFF;
+static inline uint32_t blend_4_pixels(uint32_t c1, uint32_t c2, uint32_t c3, uint32_t c4) {
+    int r = ((c1 & 0xFF) + (c2 & 0xFF) + (c3 & 0xFF) + (c4 & 0xFF)) >> 2;
+    int g = (((c1 >> 8) & 0xFF) + (((c2 >> 8) & 0xFF)) + (((c3 >> 8) & 0xFF)) + (((c4 >> 8) & 0xFF))) >> 2;
+    int b = (((c1 >> 16) & 0xFF) + (((c2 >> 16) & 0xFF)) + (((c3 >> 16) & 0xFF)) + (((c4 >> 16) & 0xFF))) >> 2;
+    return (0xFF << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+}
 
-            int diff = abs((int)r0 - (int)r1) + abs((int)g0 - (int)g1) + abs((int)b0 - (int)b1);
-            if (diff > 60 && diff < 380) {
-                uint8_t r_avg = (r0 + r1) / 2;
-                uint8_t g_avg = (g0 + g1) / 2;
-                uint8_t b_avg = (b0 + b1) / 2;
-                pixels[y * width + x] = (0xFF << 24) | (b_avg << 16) | (g_avg << 8) | r_avg;
+// 2-Pass Adaptive Cross De-Dither Filter for Saturn checkerboard mesh transparency
+static void apply_adaptive_cross_dedither(uint32_t *pixels, unsigned width, unsigned height) {
+    if (!g_opt_dedither || width < 4 || height < 4) return;
+
+    for (unsigned y = 1; y < height - 1; ++y) {
+        uint32_t *prev = &pixels[(y - 1) * width];
+        uint32_t *curr = &pixels[y * width];
+        uint32_t *next = &pixels[(y + 1) * width];
+
+        for (unsigned x = 1; x < width - 1; ++x) {
+            uint32_t p = curr[x];
+            uint32_t l = curr[x - 1];
+            uint32_t r = curr[x + 1];
+            uint32_t u = prev[x];
+            uint32_t d = next[x];
+
+            int diff_lr = color_dist_rgb(l, r);
+            int diff_ud = color_dist_rgb(u, d);
+            int diff_pl = color_dist_rgb(p, l);
+            int diff_pu = color_dist_rgb(p, u);
+
+            // Checkerboard mesh pattern detection
+            if ((diff_lr < 32 && diff_pl > 48 && diff_pl < 360) ||
+                (diff_ud < 32 && diff_pu > 48 && diff_pu < 360)) {
+                curr[x] = blend_4_pixels(p, l, r, (diff_ud < 32) ? u : d);
+            }
+        }
+    }
+}
+
+// Fast Sub-pixel Edge Anti-Aliasing (FXAA) for 3D polygon geometry
+static void apply_edge_anti_aliasing(uint32_t *pixels, unsigned width, unsigned height) {
+    if (!g_opt_smoothing || width < 4 || height < 4) return;
+
+    for (unsigned y = 1; y < height - 1; ++y) {
+        uint32_t *prev = &pixels[(y - 1) * width];
+        uint32_t *curr = &pixels[y * width];
+        uint32_t *next = &pixels[(y + 1) * width];
+
+        for (unsigned x = 1; x < width - 1; ++x) {
+            uint32_t c = curr[x];
+            uint32_t l = curr[x - 1];
+            uint32_t r = curr[x + 1];
+            uint32_t u = prev[x];
+            uint32_t d = next[x];
+
+            int lum_c = (((c & 0xFF) * 2) + (((c >> 8) & 0xFF) * 5) + ((c >> 16) & 0xFF)) >> 3;
+            int lum_l = (((l & 0xFF) * 2) + (((l >> 8) & 0xFF) * 5) + ((l >> 16) & 0xFF)) >> 3;
+            int lum_r = (((r & 0xFF) * 2) + (((r >> 8) & 0xFF) * 5) + ((r >> 16) & 0xFF)) >> 3;
+            int lum_u = (((u & 0xFF) * 2) + (((u >> 8) & 0xFF) * 5) + ((u >> 16) & 0xFF)) >> 3;
+            int lum_d = (((d & 0xFF) * 2) + (((d >> 8) & 0xFF) * 5) + ((d >> 16) & 0xFF)) >> 3;
+
+            int min_lum = MIN(lum_c, MIN(MIN(lum_l, lum_r), MIN(lum_u, lum_d)));
+            int max_lum = MAX(lum_c, MAX(MAX(lum_l, lum_r), MAX(lum_u, lum_d)));
+            int contrast = max_lum - min_lum;
+
+            // Only smooth sharp polygon boundaries (preserving text/HUD sharpness)
+            if (contrast > 40 && contrast < 220) {
+                uint32_t cross_avg = blend_4_pixels(l, r, u, d);
+                curr[x] = blend_2_pixels(c, cross_avg, 0.35f);
             }
         }
     }
@@ -233,6 +306,14 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 dst[idx + 3] = 255;                           // A
             }
         }
+    }
+
+    // Apply Graphics Enhancements
+    if (g_opt_dedither) {
+        apply_adaptive_cross_dedither((uint32_t *)dst, width, height);
+    }
+    if (g_opt_smoothing) {
+        apply_edge_anti_aliasing((uint32_t *)dst, width, height);
     }
 }
 
@@ -397,6 +478,7 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
         self.layer.backgroundColor = [[NSColor blackColor] CGColor];
         self.layer.contentsGravity = kCAGravityResizeAspect;
         self.layer.magnificationFilter = kCAFilterTrilinear;
+        self.layer.minificationFilter = kCAFilterTrilinear;
     }
     return self;
 }
@@ -434,6 +516,14 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
 @property (nonatomic, strong) SaturnView *saturnView;
 @property (nonatomic, strong) NSTimer *renderTimer;
 - (void)tick;
+- (void)selectResolution:(int)scale;
+- (IBAction)selectResolution1x:(id)sender;
+- (IBAction)selectResolution2x:(id)sender;
+- (IBAction)selectResolution4x:(id)sender;
+- (IBAction)selectResolution8x:(id)sender;
+- (IBAction)toggleSmoothing:(id)sender;
+- (IBAction)toggleDeDither:(id)sender;
+- (IBAction)toggleFullScreen:(id)sender;
 @end
 
 @implementation SaturnWindowController
@@ -442,6 +532,30 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
     if (!g_core_handle || !p_retro_run) return;
     p_retro_run();
     [self.saturnView updateFrameImage];
+}
+
+- (void)selectResolution:(int)scale {
+    g_opt_resolution_scale = scale;
+    NSLog(@"[SaturnMac] Internal resolution switched to %dx", scale);
+}
+- (IBAction)selectResolution1x:(id)sender { [self selectResolution:1]; }
+- (IBAction)selectResolution2x:(id)sender { [self selectResolution:2]; }
+- (IBAction)selectResolution4x:(id)sender { [self selectResolution:4]; }
+- (IBAction)selectResolution8x:(id)sender { [self selectResolution:8]; }
+
+- (IBAction)toggleSmoothing:(id)sender {
+    g_opt_smoothing = !g_opt_smoothing;
+    self.saturnView.layer.magnificationFilter = g_opt_smoothing ? kCAFilterTrilinear : kCAFilterNearest;
+    NSLog(@"[SaturnMac] Graphic smoothing (Anti-Aliasing) toggled: %@", g_opt_smoothing ? @"ON" : @"OFF");
+}
+
+- (IBAction)toggleDeDither:(id)sender {
+    g_opt_dedither = !g_opt_dedither;
+    NSLog(@"[SaturnMac] De-Dither (Transparency mesh fix) toggled: %@", g_opt_dedither ? @"ON" : @"OFF");
+}
+
+- (IBAction)toggleFullScreen:(id)sender {
+    [self.window toggleFullScreen:sender];
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
@@ -475,6 +589,19 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
 }
 
 - (void)handleKeyDown:(NSEvent *)event {
+    if (event.modifierFlags & NSEventModifierFlagCommand) {
+        switch (event.keyCode) {
+            case 18: [self selectResolution:1]; return; // Cmd+1
+            case 19: [self selectResolution:2]; return; // Cmd+2
+            case 20: [self selectResolution:4]; return; // Cmd+3
+            case 21: [self selectResolution:8]; return; // Cmd+4
+            case 1:  [self toggleSmoothing:nil]; return; // Cmd+S
+            case 2:  [self toggleDeDither:nil]; return;  // Cmd+D
+            case 3:  [self toggleFullScreen:nil]; return; // Cmd+F
+            default: break;
+        }
+    }
+
     NSLog(@"[SaturnMac Input] KeyDown: code=%u", (unsigned)event.keyCode);
     switch (event.keyCode) {
         // Directional Arrows
@@ -566,6 +693,7 @@ int main(int argc, const char * argv[]) {
             if (strcmp(argv[i], "--title") == 0 && i + 1 < argc) gameTitle = [NSString stringWithUTF8String:argv[++i]];
             if (strcmp(argv[i], "--resolution") == 0 && i + 1 < argc) g_opt_resolution_scale = atoi(argv[++i]);
             if (strcmp(argv[i], "--no-dedither") == 0) g_opt_dedither = false;
+            if (strcmp(argv[i], "--no-smoothing") == 0) g_opt_smoothing = false;
         }
 
         if (!romPath) {
@@ -721,6 +849,45 @@ int main(int argc, const char * argv[]) {
         controller.saturnView = saturnView;
         window.delegate = controller;
         [NSApp setDelegate:controller];
+
+        // Add View Menu for Resolution & Smoothing Controls
+        NSMenu *viewMenu = [NSMenu new];
+        NSMenuItem *viewMenuItem = [NSMenuItem new];
+        [viewMenuItem setTitle:@"View"];
+        [viewMenuItem setSubmenu:viewMenu];
+        [menubar addItem:viewMenuItem];
+
+        NSMenuItem *res1 = [[NSMenuItem alloc] initWithTitle:@"Resolution: 1x Native (240p)" action:@selector(selectResolution1x:) keyEquivalent:@"1"];
+        res1.target = controller;
+        [viewMenu addItem:res1];
+
+        NSMenuItem *res2 = [[NSMenuItem alloc] initWithTitle:@"Resolution: 2x HD (480p)" action:@selector(selectResolution2x:) keyEquivalent:@"2"];
+        res2.target = controller;
+        [viewMenu addItem:res2];
+
+        NSMenuItem *res4 = [[NSMenuItem alloc] initWithTitle:@"Resolution: 4x Retina (960p)" action:@selector(selectResolution4x:) keyEquivalent:@"3"];
+        res4.target = controller;
+        [viewMenu addItem:res4];
+
+        NSMenuItem *res8 = [[NSMenuItem alloc] initWithTitle:@"Resolution: 8x Ultra HD (1920p)" action:@selector(selectResolution8x:) keyEquivalent:@"4"];
+        res8.target = controller;
+        [viewMenu addItem:res8];
+
+        [viewMenu addItem:[NSMenuItem separatorItem]];
+
+        NSMenuItem *smoothItem = [[NSMenuItem alloc] initWithTitle:@"Smooth Graphics (Anti-Aliasing)" action:@selector(toggleSmoothing:) keyEquivalent:@"s"];
+        smoothItem.target = controller;
+        [viewMenu addItem:smoothItem];
+
+        NSMenuItem *deditherItem = [[NSMenuItem alloc] initWithTitle:@"De-Dither (Transparency Mesh Fix)" action:@selector(toggleDeDither:) keyEquivalent:@"d"];
+        deditherItem.target = controller;
+        [viewMenu addItem:deditherItem];
+
+        [viewMenu addItem:[NSMenuItem separatorItem]];
+
+        NSMenuItem *fsItem = [[NSMenuItem alloc] initWithTitle:@"Toggle Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"];
+        fsItem.target = controller;
+        [viewMenu addItem:fsItem];
 
         // Global Event Monitor for Keyboard Controls
         [NSEvent addLocalMonitorForEventsMatchingMask:(NSEventMaskKeyDown | NSEventMaskKeyUp) handler:^NSEvent *(NSEvent *event) {

@@ -1,5 +1,6 @@
 use crate::icns::IcnsBuilder;
 use crate::parser::SaturnGameInfo;
+use crate::scraper::GameArtScraper;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -7,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppBundleOptions {
-    pub internal_resolution: u32,   // 1 = Native 240p/480p, 2 = 2x, 4 = 4x Retina
+    pub internal_resolution: u32,   // 1 = Native 240p/480p, 2 = 2x, 4 = 4x, 8 = 8x Retina HD
     pub metal_rendering: bool,       // Use Metal graphics pipeline
     pub promotion_120hz: bool,       // Adaptive ProMotion 120Hz frame pacing
     pub widescreen_anamorphic: bool, // 16:9 widescreen geometry mode
@@ -73,18 +74,33 @@ impl AppBundler {
         // 2. Generate PkgInfo
         fs::write(contents_dir.join("PkgInfo"), "APPL????")?;
 
-        // 3. Generate AppIcon.icns
-        let icns_bytes = if let Some(ref icon_path) = options.icon_png_path {
+        // 3. Generate AppIcon.icns & save authentic cover art
+        let (icns_bytes, raw_cover_bytes): (Vec<u8>, Option<Vec<u8>>) = if let Some(ref icon_path) = options.icon_png_path {
             if icon_path.exists() {
                 let png = fs::read(icon_path)?;
-                IcnsBuilder::from_png(&png)?
+                let icns = IcnsBuilder::from_image_bytes(&png)
+                    .unwrap_or_else(|_| IcnsBuilder::from_png(&png).unwrap_or_default());
+                (icns, Some(png))
             } else {
-                IcnsBuilder::icon_for_game(&info.title, &info.product_id)
+                let fallback = IcnsBuilder::fallback_icon_for_game(&info.title, &info.product_id);
+                (fallback, None)
             }
         } else {
-            IcnsBuilder::icon_for_game(&info.title, &info.product_id)
+            // Automatically search and download official box art online
+            if let Some(scraped_png) = GameArtScraper::fetch_boxart(&info.title, &info.product_id, &info.regions) {
+                let icns = IcnsBuilder::from_image_bytes(&scraped_png)
+                    .unwrap_or_else(|_| IcnsBuilder::from_png(&scraped_png).unwrap_or_default());
+                (icns, Some(scraped_png))
+            } else {
+                let fallback = IcnsBuilder::fallback_icon_for_game(&info.title, &info.product_id);
+                (fallback, None)
+            }
         };
-        fs::write(resources_dir.join("AppIcon.icns"), icns_bytes)?;
+
+        fs::write(resources_dir.join("AppIcon.icns"), &icns_bytes)?;
+        if let Some(ref cover) = raw_cover_bytes {
+            let _ = fs::write(resources_dir.join("Cover.png"), cover);
+        }
 
         // 4. Copy ROM files (handling CUE + BIN / multi-tracks)
         copy_rom_files(rom_path, &game_dir)?;

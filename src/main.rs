@@ -1,13 +1,17 @@
 mod archive;
 mod bundler;
 mod icns;
+mod ios;
 mod parser;
+mod release;
+mod scraper;
 
 use anyhow::{Context, Result};
 use archive::ZipExtractor;
 use bundler::{AppBundleOptions, AppBundler};
 use clap::{Parser, Subcommand};
 use parser::SaturnDiscParser;
+use release::ReleaseManager;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -17,7 +21,7 @@ use std::path::{Path, PathBuf};
     name = "saturnmac",
     author = "carlosSP",
     version = "0.1.0",
-    about = "Convert Sega Saturn game ROMs (BIN, CUE, ISO, CHD) into standalone native macOS applications optimized for Apple Silicon."
+    about = "Convert Sega Saturn game ROMs (BIN, CUE, ISO, CHD, ZIP) into standalone native macOS applications and iOS/iPadOS packages optimized for Apple Silicon."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -28,7 +32,7 @@ struct Cli {
 enum Commands {
     /// Inspect a Sega Saturn disc image and show header metadata
     Inspect {
-        /// Path to .cue, .bin, or .iso file
+        /// Path to .cue, .bin, .iso, or .zip file
         #[arg(value_name = "ROM_PATH")]
         path: PathBuf,
 
@@ -39,7 +43,7 @@ enum Commands {
 
     /// Package a Sega Saturn ROM into a standalone macOS .app bundle
     Bundle {
-        /// Path to .cue, .bin, or .iso file
+        /// Path to .cue, .bin, .iso, or .zip file
         #[arg(value_name = "ROM_PATH")]
         path: PathBuf,
 
@@ -47,12 +51,39 @@ enum Commands {
         #[arg(short, long, default_value = "./dist")]
         output: PathBuf,
 
-        /// Optional path to a custom icon PNG or box art
+        /// Optional path to a custom icon PNG or box art (auto-searched online if omitted)
         #[arg(short, long)]
         icon: Option<PathBuf>,
 
-        /// Internal rendering resolution (1 = 240p native, 2 = 2x, 4 = 4x Retina)
-        #[arg(short, long, default_value_t = 2)]
+        /// Internal rendering resolution (1 = 240p native, 2 = 2x, 4 = 4x Retina, 8 = 8x Ultra HD)
+        #[arg(short, long, default_value_t = 4)]
+        resolution: u32,
+
+        /// Enable Metal CRT phosphor shader
+        #[arg(long)]
+        crt: bool,
+
+        /// Enable 16:9 anamorphic widescreen geometry mode
+        #[arg(long)]
+        widescreen: bool,
+    },
+
+    /// Generate complete multiplatform releases for macOS (.app & .dmg) and universal iOS/iPadOS (.ipa)
+    Release {
+        /// Path to .cue, .bin, .iso, or .zip file
+        #[arg(value_name = "ROM_PATH")]
+        path: PathBuf,
+
+        /// Output directory where release packages will be saved
+        #[arg(short, long, default_value = "./dist/releases")]
+        output: PathBuf,
+
+        /// Optional path to a custom icon PNG or box art (auto-searched online if omitted)
+        #[arg(short, long)]
+        icon: Option<PathBuf>,
+
+        /// Internal rendering resolution (1 = 240p native, 2 = 2x, 4 = 4x Retina, 8 = 8x Ultra HD)
+        #[arg(short, long, default_value_t = 4)]
         resolution: u32,
 
         /// Enable Metal CRT phosphor shader
@@ -176,6 +207,50 @@ fn main() -> Result<()> {
             println!("  Path: {}", bundle_path.display());
             println!("  Bundle ID: com.saturnmac.{}", info.product_id.to_lowercase().replace(['-', ' ', '_', '/'], ""));
             println!("  Optimizations: Apple Silicon ARM64, Metal Pipeline, ProMotion 120Hz, GameController API");
+        }
+
+        Commands::Release {
+            path,
+            output,
+            icon,
+            resolution,
+            crt,
+            widescreen,
+        } => {
+            let is_zip = path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
+            let (target_rom, temp_cleanup) = if is_zip {
+                println!("📦 S'ha detectat un arxiu ZIP. Descomprimint per a la release: {}", path.display());
+                let temp_dir = ZipExtractor::extract_zip(&path)?;
+                let primary = ZipExtractor::find_primary_rom(&temp_dir)?;
+                println!("  🎯 S'ha localitzat la imatge principal del joc: {}", primary.file_name().unwrap_or_default().to_string_lossy());
+                (primary, Some(temp_dir))
+            } else {
+                (path.clone(), None)
+            };
+
+            println!("📦 Reading disc info from: {}", target_rom.display());
+            let info = SaturnDiscParser::parse(&target_rom)?;
+            println!("✨ Detected Game: \"{}\" ({})", info.title, info.product_id);
+
+            let options = AppBundleOptions {
+                internal_resolution: resolution,
+                metal_rendering: true,
+                promotion_120hz: true,
+                widescreen_anamorphic: widescreen,
+                crt_shader: crt,
+                icon_png_path: icon,
+            };
+
+            let artifacts = ReleaseManager::build_all_releases(&target_rom, &info, &output, &options)?;
+
+            if let Some(ref dir) = temp_cleanup {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+
+            println!("🏁 Release completa finalitzada.");
+            println!("  - Mac App:  {}", artifacts.mac_app.display());
+            println!("  - Mac DMG:  {}", artifacts.mac_dmg.display());
+            println!("  - iOS/iPad: {}", artifacts.ios_ipa.display());
         }
 
         Commands::Mock {
