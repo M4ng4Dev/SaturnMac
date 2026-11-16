@@ -7,7 +7,7 @@ struct SaturnMacApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 860, minHeight: 640)
+                .frame(minWidth: 880, minHeight: 660)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
@@ -69,6 +69,51 @@ struct I18N {
                 "ca": "Buscant caràtula oficial...",
                 "es": "Buscando carátula oficial...",
                 "en": "Searching official box art..."
+            ],
+            "change_cover_btn": [
+                "ca": "Canviar caràtula...",
+                "es": "Cambiar carátula...",
+                "en": "Change box art..."
+            ],
+            "similar_covers_header": [
+                "ca": "💡 Caràtules amb noms semblants (fes clic per triar-ne una per a la icona):",
+                "es": "💡 Carátulas con nombres similares (haz clic para elegir una para el icono):",
+                "en": "💡 Similar matching box arts (click to choose one for the game icon):"
+            ],
+            "cover_picker_title": [
+                "ca": "Seleccionar Caràtula per a la Icona del Joc",
+                "es": "Seleccionar Carátula para el Icono del Juego",
+                "en": "Select Box Art for Game Icon"
+            ],
+            "search_covers_placeholder": [
+                "ca": "Cercar a les 2.294 caràtules de Saturn (ex: Sonic, Panzer, Rally...)",
+                "es": "Buscar en las 2.294 carátulas de Saturn (ej: Sonic, Panzer, Rally...)",
+                "en": "Search 2,294 Saturn box arts (e.g. Sonic, Panzer, Rally...)"
+            ],
+            "choose_custom_file": [
+                "ca": "Tria una imatge des del Mac...",
+                "es": "Elegir imagen desde el Mac...",
+                "en": "Choose image from Mac..."
+            ],
+            "select_this_art": [
+                "ca": "Utilitzar",
+                "es": "Usar",
+                "en": "Use"
+            ],
+            "active_icon_badge": [
+                "ca": "Seleccionada",
+                "es": "Seleccionada",
+                "en": "Selected"
+            ],
+            "done_btn": [
+                "ca": "Fet",
+                "es": "Listo",
+                "en": "Done"
+            ],
+            "no_results": [
+                "ca": "No s'han trobat caràtules per a aquesta cerca.",
+                "es": "No se encontraron carátulas para esta búsqueda.",
+                "en": "No box arts found matching this search."
             ],
             "dev_label": [
                 "ca": "Desenvolupador:",
@@ -264,6 +309,13 @@ struct PortedApp: Identifiable {
     let dateModified: Date
 }
 
+struct CoverCandidate: Identifiable, Hashable {
+    var id: String { filename }
+    let filename: String
+    let displayName: String
+    let urlString: String
+}
+
 // MARK: - Main Content View
 
 struct ContentView: View {
@@ -273,6 +325,14 @@ struct ContentView: View {
     @State private var loadedGame: SaturnDiscMetadata? = nil
     @State private var coverImage: NSImage? = nil
     @State private var isLoadingArt: Bool = false
+
+    // Box Art Candidates & Customization
+    @State private var similarCandidates: [CoverCandidate] = []
+    @State private var candidateThumbnails: [String: NSImage] = [:]
+    @State private var showCoverPicker: Bool = false
+    @State private var coverSearchText: String = ""
+    @State private var customSearchResults: [CoverCandidate] = []
+    @State private var selectedCoverFilename: String = ""
 
     // Options
     @State private var internalResolution: Int = 4 // 1, 2, 4, 8
@@ -311,6 +371,9 @@ struct ContentView: View {
                     libraryTabContent
                 }
             }
+        }
+        .sheet(isPresented: $showCoverPicker) {
+            coverPickerSheet
         }
         .onAppear {
             ensureOutputDirectory()
@@ -448,94 +511,196 @@ struct ContentView: View {
 
     // MARK: - Game Overview Card
     func gameOverviewCard(_ game: SaturnDiscMetadata) -> some View {
-        HStack(alignment: .top, spacing: 20) {
-            // Box Art Preview
-            ZStack {
-                if let img = coverImage {
-                    Image(nsImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 140, height: 190)
-                        .cornerRadius(10)
-                        .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
-                } else if isLoadingArt {
-                    VStack(spacing: 8) {
-                        ProgressView()
-                        Text(t("searching_art"))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 20) {
+                // Box Art Preview & Change Button
+                VStack(spacing: 8) {
+                    ZStack {
+                        if let img = coverImage {
+                            Image(nsImage: img)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 140, height: 190)
+                                .cornerRadius(10)
+                                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                        } else if isLoadingArt {
+                            VStack(spacing: 8) {
+                                ProgressView()
+                                Text(t("searching_art"))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(width: 140, height: 190)
+                            .background(Color.secondary.opacity(0.08).cornerRadius(10))
+                        } else {
+                            VStack(spacing: 8) {
+                                Image(systemName: "opticaldisc.fill")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(.secondary)
+                                Text("Sega Saturn")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(width: 140, height: 190)
+                            .background(Color.secondary.opacity(0.08).cornerRadius(10))
+                        }
                     }
-                    .frame(width: 140, height: 190)
-                    .background(Color.secondary.opacity(0.08).cornerRadius(10))
-                } else {
-                    VStack(spacing: 8) {
-                        Image(systemName: "opticaldisc.fill")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.secondary)
-                        Text("Sega Saturn")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(width: 140, height: 190)
-                    .background(Color.secondary.opacity(0.08).cornerRadius(10))
-                }
-            }
-
-            // Info Details
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(game.title)
-                        .font(.title2.bold())
-                        .foregroundColor(.primary)
-
-                    Spacer()
 
                     Button(action: {
-                        self.loadedGame = nil
-                        self.coverImage = nil
-                        self.generatedAppURL = nil
-                        self.logLines.removeAll()
+                        self.coverSearchText = game.title
+                        self.performCoverSearch(query: game.title)
+                        self.showCoverPicker = true
                     }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
-                            .foregroundColor(.secondary)
+                        Label(t("change_cover_btn"), systemImage: "photo.badge.plus")
+                            .font(.caption2.bold())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
 
-                HStack(spacing: 8) {
-                    TagBadge(text: game.product_id, color: .blue)
-                    TagBadge(text: game.regions.first ?? "Regió Desconeguda", color: .purple)
-                    TagBadge(text: game.version, color: .gray)
-                    if !game.tracks.isEmpty {
-                        TagBadge(text: "\(game.tracks.count) \(t("tracks_count"))", color: .teal)
-                    }
-                }
+                // Info Details
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(game.title)
+                            .font(.title2.bold())
+                            .foregroundColor(.primary)
 
-                Divider().padding(.vertical, 2)
+                        Spacer()
 
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                    GridRow {
-                        Text(t("dev_label")).font(.caption).foregroundStyle(.secondary)
-                        Text(game.maker_id).font(.caption.bold())
+                        Button(action: {
+                            self.loadedGame = nil
+                            self.coverImage = nil
+                            self.similarCandidates.removeAll()
+                            self.candidateThumbnails.removeAll()
+                            self.generatedAppURL = nil
+                            self.logLines.removeAll()
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    GridRow {
-                        Text(t("release_date_label")).font(.caption).foregroundStyle(.secondary)
-                        Text(game.release_date).font(.caption)
+
+                    HStack(spacing: 8) {
+                        TagBadge(text: game.product_id, color: .blue)
+                        TagBadge(text: game.regions.first ?? "Regió Desconeguda", color: .purple)
+                        TagBadge(text: game.version, color: .gray)
+                        if !game.tracks.isEmpty {
+                            TagBadge(text: "\(game.tracks.count) \(t("tracks_count"))", color: .teal)
+                        }
                     }
-                    if let f = game.filePath {
+
+                    Divider().padding(.vertical, 2)
+
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                         GridRow {
-                            Text(t("source_file_label")).font(.caption).foregroundStyle(.secondary)
-                            Text(f.lastPathComponent).font(.caption).lineLimit(1)
+                            Text(t("dev_label")).font(.caption).foregroundStyle(.secondary)
+                            Text(game.maker_id).font(.caption.bold())
+                        }
+                        GridRow {
+                            Text(t("release_date_label")).font(.caption).foregroundStyle(.secondary)
+                            Text(game.release_date).font(.caption)
+                        }
+                        if let f = game.filePath {
+                            GridRow {
+                                Text(t("source_file_label")).font(.caption).foregroundStyle(.secondary)
+                                Text(f.lastPathComponent).font(.caption).lineLimit(1)
+                            }
                         }
                     }
                 }
+
+                Spacer()
             }
 
-            Spacer()
+            // MARK: - Similar Covers Matching Section
+            if !similarCandidates.isEmpty {
+                Divider().padding(.top, 4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(t("similar_covers_header"))
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button(action: {
+                            self.coverSearchText = game.title
+                            self.performCoverSearch(query: game.title)
+                            self.showCoverPicker = true
+                        }) {
+                            Text(t("change_cover_btn"))
+                                .font(.caption2.bold())
+                                .foregroundColor(.blue)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(similarCandidates.prefix(8)) { cand in
+                                candidateMiniCard(cand)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.secondary.opacity(0.06)))
+    }
+
+    // Mini candidate box art card
+    func candidateMiniCard(_ cand: CoverCandidate) -> some View {
+        let isSelected = selectedCoverFilename == cand.filename
+        return Button(action: {
+            selectCandidate(cand)
+        }) {
+            VStack(spacing: 4) {
+                ZStack(alignment: .topTrailing) {
+                    if let thumb = candidateThumbnails[cand.filename] {
+                        Image(nsImage: thumb)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 58, height: 78)
+                            .cornerRadius(6)
+                            .shadow(radius: 2)
+                    } else {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.secondary.opacity(0.12))
+                            .frame(width: 58, height: 78)
+                            .overlay(ProgressView().scaleEffect(0.6))
+                            .onAppear {
+                                fetchThumbnailForCandidate(cand)
+                            }
+                    }
+
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .background(Circle().fill(Color.white).padding(1))
+                            .offset(x: 4, y: -4)
+                    }
+                }
+
+                Text(cand.displayName)
+                    .font(.system(size: 9))
+                    .lineLimit(2)
+                    .frame(width: 66)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(isSelected ? Color.blue : Color.primary)
+            }
+            .padding(4)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                    .background(isSelected ? Color.blue.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Options Card
@@ -759,23 +924,25 @@ struct ContentView: View {
                 Text(game.name)
                     .font(.headline)
                     .lineLimit(1)
-                    .multilineTextAlignment(.center)
-
                 Text(t("native_app_desc"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 10) {
-                Button(action: { NSWorkspace.shared.open(game.url) }) {
+            HStack(spacing: 8) {
+                Button(action: {
+                    NSWorkspace.shared.open(game.url)
+                }) {
                     Label(t("play_game"), systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.blue)
+                .tint(.green)
                 .controlSize(.small)
 
-                Button(action: { NSWorkspace.shared.activateFileViewerSelecting([game.url]) }) {
+                Button(action: {
+                    NSWorkspace.shared.activateFileViewerSelecting([game.url])
+                }) {
                     Image(systemName: "folder")
                 }
                 .buttonStyle(.bordered)
@@ -786,17 +953,138 @@ struct ContentView: View {
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.secondary.opacity(0.06)))
     }
 
-    // MARK: - Logic & Operations
+    // MARK: - Box Art Picker Sheet
+    var coverPickerSheet: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text(t("cover_picker_title"))
+                    .font(.headline)
+
+                Spacer()
+
+                Button(t("done_btn")) {
+                    showCoverPicker = false
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField(t("search_covers_placeholder"), text: $coverSearchText)
+                    .textFieldStyle(.plain)
+                    .onSubmit {
+                        performCoverSearch(query: coverSearchText)
+                    }
+
+                if !coverSearchText.isEmpty {
+                    Button(action: {
+                        coverSearchText = ""
+                        performCoverSearch(query: "")
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Divider().frame(height: 18)
+
+                Button(action: pickCustomImageFile) {
+                    Label(t("choose_custom_file"), systemImage: "photo.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
+
+            // Results Grid
+            ScrollView {
+                let list = customSearchResults.isEmpty ? similarCandidates : customSearchResults
+                if list.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "questionmark.folder")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text(t("no_results"))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 220)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 145), spacing: 14)], spacing: 14) {
+                        ForEach(list) { cand in
+                            VStack(spacing: 6) {
+                                ZStack(alignment: .topTrailing) {
+                                    if let thumb = candidateThumbnails[cand.filename] {
+                                        Image(nsImage: thumb)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(width: 100, height: 135)
+                                            .cornerRadius(8)
+                                            .shadow(radius: 2)
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.secondary.opacity(0.12))
+                                            .frame(width: 100, height: 135)
+                                            .overlay(ProgressView().scaleEffect(0.7))
+                                            .onAppear {
+                                                fetchThumbnailForCandidate(cand)
+                                            }
+                                    }
+
+                                    if selectedCoverFilename == cand.filename {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.title3)
+                                            .foregroundColor(.green)
+                                            .background(Circle().fill(Color.white).padding(2))
+                                            .offset(x: 4, y: -4)
+                                    }
+                                }
+
+                                Text(cand.displayName)
+                                    .font(.system(size: 10))
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .frame(width: 110)
+
+                                Button(selectedCoverFilename == cand.filename ? t("active_icon_badge") : t("select_this_art")) {
+                                    selectCandidate(cand)
+                                    showCoverPicker = false
+                                }
+                                .buttonStyle(selectedCoverFilename == cand.filename ? .borderedProminent : .bordered)
+                                .controlSize(.mini)
+                                .tint(selectedCoverFilename == cand.filename ? .green : .blue)
+                            }
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(selectedCoverFilename == cand.filename ? Color.blue.opacity(0.12) : Color.secondary.opacity(0.04))
+                            )
+                        }
+                    }
+                    .padding(4)
+                }
+            }
+            .frame(minHeight: 340)
+        }
+        .padding(20)
+        .frame(minWidth: 660, minHeight: 480)
+    }
+
+    // MARK: - Actions & Logic
 
     func selectFile() {
         let panel = NSOpenPanel()
-        panel.title = t("select_file_btn")
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
         panel.allowedContentTypes = [
-            UTType(filenameExtension: "cue")!,
-            UTType(filenameExtension: "zip")!,
-            UTType(filenameExtension: "iso")!,
-            UTType(filenameExtension: "bin")!,
-            UTType(filenameExtension: "chd") ?? .data
+            UTType(filenameExtension: "cue") ?? .data,
+            UTType(filenameExtension: "iso") ?? .data,
+            UTType(filenameExtension: "chd") ?? .data,
+            UTType(filenameExtension: "bin") ?? .data,
+            UTType(filenameExtension: "zip") ?? .zip
         ]
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
@@ -816,9 +1104,32 @@ struct ContentView: View {
         }
     }
 
+    func pickCustomImageFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canCreateDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.image, .png, .jpeg]
+
+        if panel.runModal() == .OK, let url = panel.url {
+            if let img = NSImage(contentsOf: url) {
+                self.coverImage = img
+                self.selectedCoverFilename = url.lastPathComponent
+                self.appendLog("🖼️ S'ha assignat una caràtula personalitzada des de: \(url.lastPathComponent)")
+                self.showCoverPicker = false
+            }
+        }
+    }
+
     func processSelectedROM(_ url: URL) {
         logLines.removeAll()
         generatedAppURL = nil
+        similarCandidates.removeAll()
+        candidateThumbnails.removeAll()
+        customSearchResults.removeAll()
+        coverSearchText = ""
+        selectedCoverFilename = ""
         appendLog("🔍 Analitzant disc: \(url.lastPathComponent)...")
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -866,74 +1177,112 @@ struct ContentView: View {
         self.isLoadingArt = true
         self.coverImage = nil
 
-        // 1. Check embedded local assets first
+        // Find candidate matches from the 2,294 titles database
+        let candidates = searchSaturnTitles(query: title, regions: regions, limit: 12)
+        self.similarCandidates = candidates
+
         let titleUpper = title.uppercased()
         let prodUpper = productId.uppercased()
 
+        // 1. Check embedded local assets first
         if titleUpper.contains("SONIC R") || prodUpper.contains("MK-81800") || prodUpper.contains("GS-9170") {
             if let localSonic = loadLocalAsset("sonic_r.png") {
                 self.coverImage = localSonic
+                self.selectedCoverFilename = "Sonic R (USA, Brazil).png"
                 self.isLoadingArt = false
                 appendLog("🎨 Caràtula de Sonic R carregada des d'actius integrats.")
+                // Preload similar candidates in background
+                preloadCandidateThumbnails(candidates)
                 return
             }
         }
 
-        // 2. Perform online download with title-casing and HTTPS
-        let formattedTitle = titleCase(title)
-        var candidates: [String] = []
-
-        let regStr = regions.joined(separator: " ").uppercased()
-        if regStr.contains("E") || regStr.contains("EUROPE") {
-            candidates.append("\(formattedTitle) (Europe).png")
-        } else if regStr.contains("J") || regStr.contains("JAPAN") {
-            candidates.append("\(formattedTitle) (Japan).png")
-            candidates.append("\(formattedTitle) (Japan) (1M).png")
-        } else {
-            candidates.append("\(formattedTitle) (USA, Brazil).png")
-            candidates.append("\(formattedTitle) (USA).png")
-        }
-
-        candidates.append("\(formattedTitle) (USA, Brazil).png")
-        candidates.append("\(formattedTitle) (USA).png")
-        candidates.append("\(formattedTitle) (Europe).png")
-        candidates.append("\(formattedTitle) (Japan).png")
-        candidates.append("\(formattedTitle).png")
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            for cand in candidates {
-                guard let encoded = cand.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { continue }
-
-                // Try HTTPS GitHub Raw (bypasses macOS ATS restrictions)
-                let httpsURL = "https://raw.githubusercontent.com/libretro-thumbnails/Sega_-_Saturn/master/Named_Boxarts/\(encoded)"
-                if let img = downloadImageDirect(httpsURL) {
+        // 2. Perform online download of best candidate
+        if let topMatch = candidates.first {
+            self.selectedCoverFilename = topMatch.filename
+            DispatchQueue.global(qos: .userInitiated).async {
+                if let img = downloadImageDirect(topMatch.urlString) {
                     DispatchQueue.main.async {
                         self.coverImage = img
+                        self.candidateThumbnails[topMatch.filename] = img
                         self.isLoadingArt = false
-                        self.appendLog("🎨 Caràtula oficial trobada a Libretro: \(cand)")
+                        self.appendLog("🎨 Caràtula oficial seleccionada: \(topMatch.displayName)")
                     }
-                    return
-                }
-
-                // Fallback to HTTP Libretro thumbnails
-                let httpURL = "http://thumbnails.libretro.com/Sega%20-%20Saturn/Named_Boxarts/\(encoded)"
-                if let img = downloadImageDirect(httpURL) {
+                } else {
+                    // Fallback to local default Saturn art
                     DispatchQueue.main.async {
-                        self.coverImage = img
+                        self.coverImage = loadLocalAsset("saturn_default.png")
                         self.isLoadingArt = false
-                        self.appendLog("🎨 Caràtula oficial trobada a Libretro: \(cand)")
+                        self.appendLog("ℹ️ S'ha assignat la icona oficial integrada de Sega Saturn.")
                     }
-                    return
                 }
             }
-
-            // Fallback to local default Saturn art
+        } else {
             DispatchQueue.main.async {
                 self.coverImage = loadLocalAsset("saturn_default.png")
                 self.isLoadingArt = false
-                self.appendLog("ℹ️ S'ha assignat la icona oficial integrada de Sega Saturn.")
             }
         }
+
+        // Preload candidate thumbnails for quick selection
+        preloadCandidateThumbnails(candidates)
+    }
+
+    func preloadCandidateThumbnails(_ candidates: [CoverCandidate]) {
+        DispatchQueue.global(qos: .background).async {
+            for cand in candidates.prefix(6) {
+                if self.candidateThumbnails[cand.filename] == nil {
+                    if let img = downloadImageDirect(cand.urlString) {
+                        DispatchQueue.main.async {
+                            self.candidateThumbnails[cand.filename] = img
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func fetchThumbnailForCandidate(_ cand: CoverCandidate) {
+        if candidateThumbnails[cand.filename] != nil { return }
+        DispatchQueue.global(qos: .background).async {
+            if let img = downloadImageDirect(cand.urlString) {
+                DispatchQueue.main.async {
+                    self.candidateThumbnails[cand.filename] = img
+                }
+            }
+        }
+    }
+
+    func selectCandidate(_ cand: CoverCandidate) {
+        self.selectedCoverFilename = cand.filename
+        self.appendLog("🎨 S'ha seleccionat la caràtula: \(cand.displayName)")
+
+        if let cached = candidateThumbnails[cand.filename] {
+            self.coverImage = cached
+        } else {
+            self.isLoadingArt = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                if let img = downloadImageDirect(cand.urlString) {
+                    DispatchQueue.main.async {
+                        self.candidateThumbnails[cand.filename] = img
+                        if self.selectedCoverFilename == cand.filename {
+                            self.coverImage = img
+                        }
+                        self.isLoadingArt = false
+                    }
+                }
+            }
+        }
+    }
+
+    func performCoverSearch(query: String) {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty {
+            customSearchResults = []
+            return
+        }
+        customSearchResults = searchSaturnTitles(query: q, limit: 24)
+        preloadCandidateThumbnails(customSearchResults)
     }
 
     func portGame(mode: String) {
@@ -944,12 +1293,25 @@ struct ContentView: View {
         currentStep = mode == "release" ? "Generant release multiplataforma..." : "Portejant aplicació a Mac..."
         appendLog("🚀 Iniciant portabilitat de \"\(game.title)\" a \(outputDirectory.path)...")
 
+        // If a coverImage is currently active, export it to PNG so saturnmac uses it as the icon
+        var tempIconFile: String? = nil
+        if let img = self.coverImage,
+           let tiff = img.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let pngData = rep.representation(using: .png, properties: [:]) {
+            let tmpPath = NSTemporaryDirectory().appending("saturn_icon_\(UUID().uuidString).png")
+            if (try? pngData.write(to: URL(fileURLWithPath: tmpPath))) != nil {
+                tempIconFile = tmpPath
+            }
+        }
+
         DispatchQueue.global(qos: .userInitiated).async {
             guard let saturnmacBin = findBinary("saturnmac") else {
                 DispatchQueue.main.async {
                     self.appendLog("❌ No s'ha trobat l'executable saturnmac.")
                     self.isProcessing = false
                 }
+                if let tmp = tempIconFile { try? FileManager.default.removeItem(atPath: tmp) }
                 return
             }
 
@@ -959,6 +1321,11 @@ struct ContentView: View {
                 "--output", outputDirectory.path,
                 "--resolution", String(internalResolution)
             ]
+
+            if let icon = tempIconFile {
+                args.append("--icon")
+                args.append(icon)
+            }
 
             if enableCRTShader { args.append("--crt") }
             if enableWidescreen { args.append("--widescreen") }
@@ -986,14 +1353,16 @@ struct ContentView: View {
             do {
                 try proc.run()
                 proc.waitUntilExit()
-                pipe.fileHandleForReading.readabilityHandler = nil
+
+                if let tmp = tempIconFile {
+                    try? FileManager.default.removeItem(atPath: tmp)
+                }
 
                 DispatchQueue.main.async {
                     self.isProcessing = false
                     if proc.terminationStatus == 0 {
-                        NSSound(named: "Glass")?.play()
-                        let appName = sanitizeFilename(game.title)
-                        let appPath = outputDirectory.appendingPathComponent("\(appName).app")
+                        let cleanName = sanitizeFilename(game.title)
+                        let appPath = outputDirectory.appendingPathComponent("\(cleanName).app")
                         self.generatedAppURL = appPath
                         self.appendLog("🎉 Joc portat amb èxit a: \(appPath.path)")
                         self.refreshLibrary()
@@ -1002,6 +1371,9 @@ struct ContentView: View {
                     }
                 }
             } catch {
+                if let tmp = tempIconFile {
+                    try? FileManager.default.removeItem(atPath: tmp)
+                }
                 DispatchQueue.main.async {
                     self.isProcessing = false
                     self.appendLog("❌ Error: \(error.localizedDescription)")
@@ -1024,35 +1396,42 @@ struct ContentView: View {
 
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: runnerBin)
-            proc.arguments = [
-                "--rom", romURL.path,
-                "--title", game.title,
-                "--resolution", String(internalResolution)
-            ]
-            if !enableDeDither { proc.arguments?.append("--no-dedither") }
-            if !enableAntiAliasing { proc.arguments?.append("--no-smoothing") }
+            proc.arguments = [romURL.path]
 
             do {
                 try proc.run()
+                DispatchQueue.main.async {
+                    self.appendLog("🎮 Joc obert en finestra Metal. Fes servir el comandament o teclat per jugar.")
+                }
             } catch {
                 DispatchQueue.main.async {
-                    self.appendLog("❌ Error llançant el joc: \(error.localizedDescription)")
+                    self.appendLog("❌ Error iniciant saturn_runner: \(error.localizedDescription)")
                 }
             }
         }
     }
 
     func refreshLibrary() {
-        var apps: [PortedApp] = []
-        if let contents = try? FileManager.default.contentsOfDirectory(at: outputDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles) {
-            for item in contents where item.pathExtension == "app" && item.lastPathComponent != "SaturnMac.app" {
-                let name = item.deletingPathExtension().lastPathComponent
-                let date = (try? item.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
-                let icon = NSWorkspace.shared.icon(forFile: item.path)
-                apps.append(PortedApp(name: name, url: item, icon: icon, dateModified: date))
+        DispatchQueue.global(qos: .userInitiated).async {
+            var apps: [PortedApp] = []
+            let fm = FileManager.default
+
+            if let items = try? fm.contentsOfDirectory(at: outputDirectory, includingPropertiesForKeys: [.contentModificationDateKey]) {
+                for item in items where item.pathExtension == "app" && item.lastPathComponent != "SaturnMac.app" {
+                    let name = item.deletingPathExtension().lastPathComponent
+                    let icon = NSWorkspace.shared.icon(forFile: item.path)
+                    let attrs = try? fm.attributesOfItem(atPath: item.path)
+                    let modDate = attrs?[.modificationDate] as? Date ?? Date()
+                    apps.append(PortedApp(name: name, url: item, icon: icon, dateModified: modDate))
+                }
+            }
+
+            apps.sort { $0.dateModified > $1.dateModified }
+
+            DispatchQueue.main.async {
+                self.portedGames = apps
             }
         }
-        self.portedGames = apps.sorted(by: { $0.dateModified > $1.dateModified })
     }
 
     func ensureOutputDirectory() {
@@ -1064,7 +1443,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Components
+// MARK: - UI Components
 
 struct TagBadge: View {
     let text: String
@@ -1096,19 +1475,7 @@ struct VisualEffectView: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
-// MARK: - Helpers
-
-func titleCase(_ s: String) -> String {
-    let clean = s.replacingOccurrences(of: "\0", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-    let words = clean.components(separatedBy: .whitespaces)
-    let cased = words.map { w -> String in
-        if w.count <= 2 && w.allSatisfy({ $0.isLetter }) {
-            return w.uppercased()
-        }
-        return w.prefix(1).uppercased() + w.dropFirst().lowercased()
-    }
-    return cased.joined(separator: " ")
-}
+// MARK: - Helpers & Search
 
 func sanitizeFilename(_ s: String) -> String {
     let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " -_"))
@@ -1136,8 +1503,87 @@ func loadLocalAsset(_ name: String) -> NSImage? {
     return nil
 }
 
+func getCachedSaturnTitles() -> [String] {
+    if let bundleURL = Bundle.main.resourceURL?.appendingPathComponent("saturn_titles.txt"),
+       let content = try? String(contentsOf: bundleURL, encoding: .utf8) {
+        return content.components(separatedBy: "\n")
+    }
+
+    let home = NSHomeDirectory()
+    let paths = [
+        "assets/saturn_titles.txt",
+        "../assets/saturn_titles.txt",
+        "\(home)/Documents/SaturnMac/assets/saturn_titles.txt"
+    ]
+
+    for p in paths {
+        if let content = try? String(contentsOfFile: p, encoding: .utf8) {
+            return content.components(separatedBy: "\n")
+        }
+    }
+
+    return []
+}
+
+func searchSaturnTitles(query: String, regions: [String] = [], limit: Int = 16) -> [CoverCandidate] {
+    let titles = getCachedSaturnTitles()
+    let cleanQ = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let queryWords = cleanQ.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    if queryWords.isEmpty { return [] }
+
+    var scored: [(String, Int)] = []
+    let regStr = regions.joined(separator: " ").uppercased()
+    let prefRegion = regStr.contains("J") ? "japan" : (regStr.contains("E") ? "europe" : "usa")
+
+    for raw in titles {
+        let filename = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if filename.isEmpty || !filename.hasSuffix(".png") { continue }
+        let base = filename.replacingOccurrences(of: ".png", with: "")
+        let lower = base.lowercased()
+
+        var score = 0
+        if lower.contains(cleanQ) {
+            score += 80
+            if lower.hasPrefix(cleanQ) { score += 40 }
+        }
+
+        let words = lower.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        var matchedCount = 0
+        for qw in queryWords {
+            if words.contains(qw) {
+                matchedCount += 1
+                score += 25
+            } else if words.contains(where: { $0.hasPrefix(qw) || qw.hasPrefix($0) }) {
+                score += 12
+            }
+        }
+
+        if matchedCount == queryWords.count && !queryWords.isEmpty {
+            score += 50
+        }
+
+        if score > 0 {
+            if lower.contains(prefRegion) { score += 20 }
+            if prefRegion == "usa" && lower.contains("usa, brazil") { score += 25 }
+            let lenDiff = abs(lower.count - cleanQ.count)
+            score -= lenDiff / 5
+            scored.append((filename, score))
+        }
+    }
+
+    scored.sort { $0.1 > $1.1 }
+    let top = scored.prefix(limit)
+
+    return top.map { item in
+        let fname = item.0
+        let cleanName = fname.replacingOccurrences(of: ".png", with: "")
+        let encoded = fname.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fname
+        let httpsURL = "https://raw.githubusercontent.com/libretro-thumbnails/Sega_-_Saturn/master/Named_Boxarts/\(encoded)"
+        return CoverCandidate(filename: fname, displayName: cleanName, urlString: httpsURL)
+    }
+}
+
 func downloadImageDirect(_ urlString: String) -> NSImage? {
-    // 1. Try URLSession data
     if let url = URL(string: urlString),
        let data = try? Data(contentsOf: url),
        data.count > 1024,
@@ -1145,7 +1591,7 @@ func downloadImageDirect(_ urlString: String) -> NSImage? {
         return img
     }
 
-    // 2. Fallback to /usr/bin/curl (immune to App Transport Security HTTP blocks)
+    // Fallback to /usr/bin/curl
     let tmpFile = NSTemporaryDirectory().appending("cover_\(UUID().uuidString).png")
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
@@ -1171,14 +1617,14 @@ func findBinary(_ name: String) -> String? {
     let current = FileManager.default.currentDirectoryPath
     let home = NSHomeDirectory()
     let candidates = [
-        "\(current)/target/debug/\(name)",
         "\(current)/target/release/\(name)",
+        "\(current)/target/debug/\(name)",
         "\(current)/runner/bin/\(name)",
-        "\(home)/Documents/SaturnMac/target/debug/\(name)",
         "\(home)/Documents/SaturnMac/target/release/\(name)",
+        "\(home)/Documents/SaturnMac/target/debug/\(name)",
         "\(home)/Documents/SaturnMac/runner/bin/\(name)",
         "/usr/local/bin/\(name)",
-        "\(home)/.cargo/bin/\(name)"
+        "/opt/homebrew/bin/\(name)"
     ]
 
     for c in candidates {

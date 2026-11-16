@@ -38,9 +38,11 @@ SaturnMac is an all-in-one suite designed to port, enhance, and package Sega Sat
   - Extracts official title (with Shift-JIS support), product code (e.g. `MK-81005`), version, and release date.
   - Identifies target region (Japan `J`, North America `U`, Europe `E`) and supported peripherals.
   - Multi-track `.cue` resolver with automatic MP3/WAV CD-DA audio track conversion.
-- **Automatic High-Resolution Box Art**:
-  - Fetches official box covers directly via Libretro's Sega Saturn database.
-  - Fallback to bundled high-res icons and Apple `.icns` generator (Retina 512×512 and 1024×1024).
+- **Intelligent Box Art & Icon Selector**:
+  - Automatically fetches official high-res covers from the Libretro Sega Saturn database.
+  - **Fuzzy matching for non-exact titles**: If a game disc has an abbreviated, misspelled, or regional variant name, SaturnMac displays the closest matching candidate covers so you can pick the right one with a single click.
+  - **Complete 2,294 Title Catalog Search**: Search any Sega Saturn game box art or import custom image files (`.png`, `.jpg`).
+  - Directly generates native Apple `.icns` icons (Retina 512×512 and 1024×1024) baked into the `.app`.
 - **Metal Graphics Enhancements for Apple Silicon (M1/M2/M3/M4)**:
   - **Internal Resolution Upscaling**: 1x Native (240p), 2x HD (480p), 4x Retina HD (960p), 8x Ultra HD 4K (1920p).
   - **FXAA Anti-Aliasing**: Smooths 3D polygon jagged edges and textures.
@@ -124,6 +126,14 @@ Generates:
 - `dist/GameName.dmg` (macOS disk image installer)
 - `dist/GameName.ipa` (Universal iOS / iPadOS application package)
 
+### 5. Search Box Art from Catalog
+Find matching box art filenames and preview URLs:
+```bash
+cargo run -- search-art "Panzer Dragoon"
+# Or output as JSON:
+cargo run -- search-art "Sonic" --json
+```
+
 ---
 
 ## 📱 Multiplatform Releases (macOS, iOS, iPadOS)
@@ -206,9 +216,11 @@ SaturnMac és una suite completa dissenyada per transformar, millorar i empaquet
   - Extreu el títol oficial (amb suport per a caràcters japonesos Shift-JIS), codi de producte (ex: `MK-81005`), versió i data de llançament.
   - Reconeix la regió (Japó `J`, Amèrica del Nord `U`, Europa `E`) i els perifèrics compatibles.
   - Conversió automàtica de pistes d'àudio CD-DA en MP3 a WAV de 16 bits i 44.1 kHz sense pèrdua.
-- **Caràtules Oficials en Alta Resolució**:
+- **Selector Intel·ligent de Caràtules i Icones**:
   - Cerca i descàrrega automàtica de la caràtula oficial mitjançant la base de dades de Libretro.
-  - Assignació de recursos integrats d'alta resolució i generació d'icones natives d'Apple `.icns` (Retina 512×512 i 1024×1024).
+  - **Coincidències per títols semblants**: Si el nom del disc no és idèntic o conté abreviatures o variants regionals, l'aplicació et mostra directament les caràtules amb els noms més semblants perquè triïs amb un sol clic la que vols utilitzar com a icona.
+  - **Cercador al catàleg complet de 2.294 jocs**: Permet cercar qualsevol títol o importar una imatge pròpia des del Mac (`.png`, `.jpg`).
+  - Generació automàtica d'arxius `.icns` d'Apple en alta resolució Retina (512×512 i 1024×1024).
 - **Millores Gràfiques Metal per a Apple Silicon (M1/M2/M3/M4)**:
   - **Reescalat de Resolució Interna**: 1x Nativa (240p), 2x HD (480p), 4x Retina HD (960p), 8x Ultra HD 4K (1920p).
   - **Suavitzat Anti-Aliasing (FXAA)**: Elimina l'aspecte dentat dels polígons 3D i textures.
@@ -291,6 +303,14 @@ Genera:
 - `dist/NomJoc.app` (Aplicació nativa de macOS)
 - `dist/NomJoc.dmg` (Imatge de disc instal·lable per a Mac)
 - `dist/NomJoc.ipa` (Paquet d'aplicació per a iPhone i iPad)
+
+### 5. Cercar Caràtules al Catàleg
+Cerca caràtules oficials coincidents per nom o títol:
+```bash
+cargo run -- search-art "Panzer Dragoon"
+# O en format JSON:
+cargo run -- search-art "Sonic" --json
+```
 
 ---
 

@@ -120,6 +120,20 @@ enum Commands {
         region: String,
     },
 
+    /// Search for matching box arts from the 2,294 Sega Saturn database
+    SearchArt {
+        /// Search query (game title)
+        query: String,
+
+        /// Limit number of results (default: 10)
+        #[arg(short, long, default_value_t = 10)]
+        limit: usize,
+
+        /// Output format as JSON
+        #[arg(short, long)]
+        json: bool,
+    },
+
     /// Build or download the native standalone Apple Silicon runner and core
     SetupRunner,
 }
@@ -289,6 +303,28 @@ fn main() -> Result<()> {
             println!("🛠️ Generating synthetic Sega Saturn disc image: {}", output.display());
             generate_mock_disc(&output, &title, &product, &region)?;
             println!("✅ Mock Saturn disc image created at {}", output.display());
+        }
+
+        Commands::SearchArt { query, limit, json } => {
+            let matches = scraper::GameArtScraper::find_similar_boxarts(&query, &[], limit);
+            if json {
+                let json_list: Vec<serde_json::Value> = matches
+                    .iter()
+                    .map(|filename| {
+                        let encoded = scraper::urlencoding_simple(filename);
+                        serde_json::json!({
+                            "filename": filename,
+                            "url": format!("https://raw.githubusercontent.com/libretro-thumbnails/Sega_-_Saturn/master/Named_Boxarts/{}", encoded)
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&json_list)?);
+            } else {
+                println!("🔎 S'han trobat {} caràtules similars per a \"{}\":", matches.len(), query);
+                for (i, name) in matches.iter().enumerate() {
+                    println!("  {}. {}", i + 1, name);
+                }
+            }
         }
 
         Commands::SetupRunner => {

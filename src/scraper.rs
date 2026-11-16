@@ -1,6 +1,8 @@
 use std::process::Command;
 use std::fs;
 
+pub const EMBEDDED_SATURN_TITLES: &str = include_str!("../assets/saturn_titles.txt");
+
 pub struct GameArtScraper;
 
 impl GameArtScraper {
@@ -12,33 +14,26 @@ impl GameArtScraper {
         let clean_title = Self::clean_title_for_search(title);
         let candidates = Self::build_candidate_filenames(&clean_title, regions);
 
-        // 1. Try direct Libretro thumbnail URLs
+        // 1. Try direct candidates (both HTTPS GitHub and HTTP Libretro)
         for filename in &candidates {
-            let encoded_filename = urlencoding_simple(filename);
-            let url = format!(
-                "http://thumbnails.libretro.com/Sega%20-%20Saturn/Named_Boxarts/{}",
-                encoded_filename
-            );
-
-            if let Some(bytes) = Self::download_file(&url) {
-                if bytes.len() > 1024 && &bytes[0..4] == b"\x89PNG" {
-                    println!("  ✅ S'ha trobat la caràtula oficial a Libretro: {}", filename);
-                    return Some(bytes);
-                }
+            if let Some(bytes) = Self::download_boxart_by_filename(filename) {
+                println!("  ✅ S'ha trobat la caràtula oficial exacta a Libretro: {}", filename);
+                return Some(bytes);
             }
         }
 
-        // 2. If direct candidates fail, search the Libretro Saturn thumbnails index
-        println!("  🔎 Fent cerca profunda a l'índex de caràtules de Sega Saturn...");
-        if let Some(matched_filename) = Self::search_libretro_index(&clean_title, regions) {
-            let encoded = urlencoding_simple(&matched_filename);
-            let url = format!(
-                "http://thumbnails.libretro.com/Sega%20-%20Saturn/Named_Boxarts/{}",
-                encoded
-            );
-            if let Some(bytes) = Self::download_file(&url) {
-                if bytes.len() > 1024 && &bytes[0..4] == b"\x89PNG" {
-                    println!("  ✅ S'ha trobat la caràtula coincident: {}", matched_filename);
+        // 2. If direct candidates fail, perform fuzzy search against all 2,294 known Saturn box arts
+        println!("  🔎 Fent cerca de caràtules amb noms similars per a \"{}\"...", clean_title);
+        let similar = Self::find_similar_boxarts(&clean_title, regions, 10);
+        if !similar.is_empty() {
+            println!("  💡 Caràtules amb títols més semblants trobades:");
+            for (i, name) in similar.iter().take(4).enumerate() {
+                println!("    {}. {}", i + 1, name);
+            }
+
+            for matched_filename in &similar {
+                if let Some(bytes) = Self::download_boxart_by_filename(matched_filename) {
+                    println!("  ✅ S'ha seleccionat i descarregat la caràtula més semblant: {}", matched_filename);
                     return Some(bytes);
                 }
             }
@@ -48,8 +43,122 @@ impl GameArtScraper {
         None
     }
 
+    /// Finds the closest matching box art filenames from the 2,294 Saturn database
+    pub fn find_similar_boxarts(query: &str, regions: &[String], limit: usize) -> Vec<String> {
+        let clean_q = query.replace('\0', "").trim().to_lowercase();
+        let query_words: Vec<&str> = clean_q
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+
+        if query_words.is_empty() {
+            return Vec::new();
+        }
+
+        let reg_str = regions.join(" ").to_uppercase();
+        let pref_region = if reg_str.contains('J') || reg_str.contains("JAPAN") {
+            "japan"
+        } else if reg_str.contains('E') || reg_str.contains("EUROPE") {
+            "europe"
+        } else {
+            "usa"
+        };
+
+        let mut scored: Vec<(String, i32)> = Vec::new();
+
+        for line in EMBEDDED_SATURN_TITLES.lines() {
+            let filename = line.trim();
+            if filename.is_empty() || !filename.ends_with(".png") {
+                continue;
+            }
+
+            let base_name = filename.strip_suffix(".png").unwrap_or(filename);
+            let lower = base_name.to_lowercase();
+
+            let mut score = 0i32;
+
+            // Direct substring match
+            if lower.contains(&clean_q) {
+                score += 80;
+                if lower.starts_with(&clean_q) {
+                    score += 40;
+                }
+            }
+
+            // Word-level matching
+            let line_words: Vec<&str> = lower
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .collect();
+
+            let mut matched_words_count = 0;
+            for qw in &query_words {
+                if line_words.contains(qw) {
+                    matched_words_count += 1;
+                    score += 25;
+                } else if line_words.iter().any(|lw| lw.starts_with(qw) || qw.starts_with(lw)) {
+                    score += 12;
+                }
+            }
+
+            // Bonus if all query words are present
+            if matched_words_count == query_words.len() && !query_words.is_empty() {
+                score += 50;
+            }
+
+            // Region preference bonus
+            if score > 0 {
+                if lower.contains(pref_region) {
+                    score += 20;
+                }
+                if pref_region == "usa" && lower.contains("usa, brazil") {
+                    score += 25;
+                }
+                // Penalty for very different lengths to favor closer titles
+                let len_diff = (lower.len() as i32 - clean_q.len() as i32).abs();
+                score -= len_diff / 5;
+
+                scored.push((filename.to_string(), score));
+            }
+        }
+
+        // Sort by score descending
+        scored.sort_by(|a, b| b.1.cmp(&a.1));
+
+        scored.into_iter().take(limit).map(|(name, _)| name).collect()
+    }
+
+    /// Downloads a box art file by trying HTTPS GitHub Raw and HTTP Libretro
+    fn download_boxart_by_filename(filename: &str) -> Option<Vec<u8>> {
+        let encoded = urlencoding_simple(filename);
+
+        // 1. Try HTTPS GitHub raw (bypasses ATS)
+        let https_url = format!(
+            "https://raw.githubusercontent.com/libretro-thumbnails/Sega_-_Saturn/master/Named_Boxarts/{}",
+            encoded
+        );
+        if let Some(bytes) = Self::download_file(&https_url) {
+            if bytes.len() > 1024 && &bytes[0..4] == b"\x89PNG" {
+                return Some(bytes);
+            }
+        }
+
+        // 2. Try HTTP Libretro
+        let http_url = format!(
+            "http://thumbnails.libretro.com/Sega%20-%20Saturn/Named_Boxarts/{}",
+            encoded
+        );
+        if let Some(bytes) = Self::download_file(&http_url) {
+            if bytes.len() > 1024 && &bytes[0..4] == b"\x89PNG" {
+                return Some(bytes);
+            }
+        }
+
+        None
+    }
+
     /// Cleans a Saturn game title string (removes trailing ellipsis, extra spaces, etc.)
-    fn clean_title_for_search(title: &str) -> String {
+    pub fn clean_title_for_search(title: &str) -> String {
         let mut clean = title.replace('\0', "").trim().to_string();
         if clean.ends_with("...") {
             clean = clean.trim_end_matches('.').trim().to_string();
@@ -105,62 +214,6 @@ impl GameArtScraper {
         candidates
     }
 
-    /// Search the Libretro Saturn thumbnails index for a matching game title
-    fn search_libretro_index(title: &str, regions: &[String]) -> Option<String> {
-        let index_url = "http://thumbnails.libretro.com/Sega%20-%20Saturn/Named_Boxarts/";
-        let index_html = Self::download_file(index_url)?;
-        let text = String::from_utf8_lossy(&index_html);
-
-        let query = title.to_lowercase();
-        let query_words: Vec<&str> = query.split_whitespace().collect();
-        if query_words.is_empty() {
-            return None;
-        }
-
-        let reg_str = regions.join(" ").to_uppercase();
-        let pref_region = if reg_str.contains('J') {
-            "japan"
-        } else if reg_str.contains('E') {
-            "europe"
-        } else {
-            "usa"
-        };
-
-        let mut best_match: Option<String> = None;
-        let mut best_score = 0;
-
-        for line in text.lines() {
-            if let Some(href_start) = line.find("href=\"") {
-                let rest = &line[href_start + 6..];
-                if let Some(href_end) = rest.find('"') {
-                    let filename_raw = &rest[..href_end];
-                    if filename_raw.ends_with(".png") {
-                        let filename = percent_decode(filename_raw);
-                        let lower = filename.to_lowercase();
-
-                        // Check if all major words match
-                        let all_words = query_words.iter().all(|w| lower.contains(w));
-                        if all_words {
-                            let mut score = 10;
-                            if lower.contains(pref_region) {
-                                score += 20;
-                            }
-                            if lower.contains("usa, brazil") && pref_region == "usa" {
-                                score += 25;
-                            }
-                            if score > best_score {
-                                best_score = score;
-                                best_match = Some(filename);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        best_match
-    }
-
     /// Downloads a URL into memory using system curl (with timeout)
     fn download_file(url: &str) -> Option<Vec<u8>> {
         let tmp_path = std::env::temp_dir().join(format!("saturn_art_{}.tmp", std::process::id()));
@@ -187,7 +240,7 @@ impl GameArtScraper {
     }
 }
 
-fn urlencoding_simple(s: &str) -> String {
+pub fn urlencoding_simple(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
@@ -198,26 +251,9 @@ fn urlencoding_simple(s: &str) -> String {
             b'(' => out.push_str("%28"),
             b')' => out.push_str("%29"),
             b',' => out.push_str("%2C"),
+            b'\'' => out.push_str("%27"),
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }
     out
-}
-
-fn percent_decode(s: &str) -> String {
-    let mut result = Vec::new();
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(val) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16) {
-                result.push(val);
-                i += 3;
-                continue;
-            }
-        }
-        result.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&result).to_string()
 }
