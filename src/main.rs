@@ -25,11 +25,17 @@ use std::path::{Path, PathBuf};
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Launch the SaturnMac graphical studio application
+    App,
+
+    /// Launch the SaturnMac graphical studio application
+    Gui,
+
     /// Inspect a Sega Saturn disc image and show header metadata
     Inspect {
         /// Path to .cue, .bin, .iso, or .zip file
@@ -121,7 +127,28 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
+    let cmd = cli.command.unwrap_or(Commands::App);
+
+    match cmd {
+        Commands::App | Commands::Gui => {
+            let app_path = Path::new("dist/SaturnMac.app");
+            if !app_path.exists() {
+                println!("⚙️ No s'ha trobat dist/SaturnMac.app. Compilant l'entorn gràfic...");
+                setup_runner_and_app()?;
+            }
+            println!("🚀 Obrint SaturnMac Studio en entorn gràfic...");
+            #[cfg(target_os = "macos")]
+            {
+                let _ = std::process::Command::new("open")
+                    .arg(app_path)
+                    .status();
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                println!("ℹ️ SaturnMac.app és l'aplicació nativa de macOS ubicada a: {}", app_path.display());
+            }
+        }
+
         Commands::Inspect { path, json } => {
             let is_zip = path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
             let (target_rom, temp_cleanup) = if is_zip {
@@ -265,24 +292,36 @@ fn main() -> Result<()> {
         }
 
         Commands::SetupRunner => {
-            println!("⚙️ Configuració del motor autònom natiu de Mac per a Apple Silicon...");
-            let runner_script = Path::new("runner/build_runner.sh");
-            if !runner_script.exists() {
-                anyhow::bail!("No s'ha trobat runner/build_runner.sh!");
-            }
-            let status = std::process::Command::new("bash")
-                .arg(runner_script)
-                .status()
-                .context("Error executant build_runner.sh")?;
-            if status.success() {
-                println!("\n🎉 Motor autònom natiu per a Apple Silicon preparat amb èxit!");
-                println!("A partir d'ara, qualsevol .app que generis serà 100% autònoma i s'obrirà en la seva pròpia finestra.");
-            } else {
-                anyhow::bail!("Ha fallat la compilació del motor. Comprova la sortida del compilador.");
-            }
+            setup_runner_and_app()?;
         }
     }
 
+    Ok(())
+}
+
+fn setup_runner_and_app() -> Result<()> {
+    println!("⚙️ Configuració de SaturnMac Studio per a Apple Silicon...");
+    let runner_script = Path::new("runner/build_runner.sh");
+    if !runner_script.exists() {
+        anyhow::bail!("No s'ha trobat runner/build_runner.sh!");
+    }
+    let status = std::process::Command::new("bash")
+        .arg(runner_script)
+        .status()
+        .context("Error executant build_runner.sh")?;
+    if status.success() {
+        // Embed official high-res Saturn icon
+        let saturn_app_res = Path::new("dist/SaturnMac.app/Contents/Resources");
+        if saturn_app_res.exists() {
+            let icns_bytes = icns::IcnsBuilder::default_saturn_icon();
+            let _ = std::fs::write(saturn_app_res.join("AppIcon.icns"), icns_bytes);
+        }
+
+        println!("\n🎉 SaturnMac.app està a punt a: dist/SaturnMac.app!");
+        println!("  Pots obrir-la directament o moure-la a /Applications per portejar qualsevol joc de Saturn en entorn gràfic.");
+    } else {
+        anyhow::bail!("Ha fallat la compilació. Comprova la sortida del compilador.");
+    }
     Ok(())
 }
 

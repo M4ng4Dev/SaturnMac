@@ -48,9 +48,34 @@ echo "✅ SaturnMac Standalone Runner ready and codesigned at: $DIR/bin/saturn_r
 # Build standalone SaturnMac.app GUI application
 APP_DIR="$DIR/../dist/SaturnMac.app"
 mkdir -p "$APP_DIR/Contents/MacOS"
+mkdir -p "$APP_DIR/Contents/Resources/bin"
 mkdir -p "$APP_DIR/Contents/Resources/cores"
-cp "$DIR/bin/saturn_runner" "$APP_DIR/Contents/MacOS/SaturnMac"
+
+# 1. Compile SwiftUI GUI with swiftc if available, or fallback to runner
+if command -v swiftc >/dev/null 2>&1 && [ -f "$DIR/../gui/Sources/ContentView.swift" ]; then
+    echo "Compiling SaturnMac Studio native macOS SwiftUI application..."
+    swiftc -O -parse-as-library \
+        -target arm64-apple-macos13.0 \
+        -framework SwiftUI \
+        -framework AppKit \
+        -framework UniformTypeIdentifiers \
+        "$DIR/../gui/Sources/ContentView.swift" \
+        -o "$APP_DIR/Contents/MacOS/SaturnMac" || cp "$DIR/bin/saturn_runner" "$APP_DIR/Contents/MacOS/SaturnMac"
+else
+    cp "$DIR/bin/saturn_runner" "$APP_DIR/Contents/MacOS/SaturnMac"
+fi
 chmod +x "$APP_DIR/Contents/MacOS/SaturnMac"
+
+# 2. Embed saturnmac CLI and saturn_runner inside SaturnMac.app Resources/bin
+if [ -f "$DIR/../target/debug/saturnmac" ]; then
+    cp "$DIR/../target/debug/saturnmac" "$APP_DIR/Contents/Resources/bin/saturnmac"
+elif [ -f "$DIR/../target/release/saturnmac" ]; then
+    cp "$DIR/../target/release/saturnmac" "$APP_DIR/Contents/Resources/bin/saturnmac"
+fi
+cp "$DIR/bin/saturn_runner" "$APP_DIR/Contents/Resources/bin/saturn_runner"
+chmod +x "$APP_DIR/Contents/Resources/bin"/* 2>/dev/null || true
+
+# 3. Embed cores
 cp "$DIR/cores"/*.dylib "$APP_DIR/Contents/Resources/cores/" 2>/dev/null || true
 
 cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
@@ -63,7 +88,7 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <key>CFBundleDisplayName</key>
     <string>SaturnMac</string>
     <key>CFBundleIdentifier</key>
-    <string>com.saturnmac.launcher</string>
+    <string>com.saturnmac.studio</string>
     <key>CFBundleVersion</key>
     <string>1.0.0</string>
     <key>CFBundleShortVersionString</key>
@@ -77,7 +102,7 @@ cat << 'EOF' > "$APP_DIR/Contents/Info.plist"
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
