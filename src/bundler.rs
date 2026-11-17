@@ -13,6 +13,10 @@ pub struct AppBundleOptions {
     pub promotion_120hz: bool,       // Adaptive ProMotion 120Hz frame pacing
     pub widescreen_anamorphic: bool, // 16:9 widescreen geometry mode
     pub crt_shader: bool,            // Metal CRT phosphor/scanlines filter
+    #[serde(default)]
+    pub dedither: bool,              // De-Dither filter for mesh transparencies
+    #[serde(default)]
+    pub smoothing: bool,             // FXAA anti-aliasing filter
     pub icon_png_path: Option<PathBuf>,
 }
 
@@ -24,6 +28,8 @@ impl Default for AppBundleOptions {
             promotion_120hz: true,
             widescreen_anamorphic: false,
             crt_shader: false,
+            dedither: false,
+            smoothing: true,
             icon_png_path: None,
         }
     }
@@ -114,6 +120,8 @@ impl AppBundler {
                 "internal_resolution": options.internal_resolution,
                 "promotion_120hz": options.promotion_120hz,
                 "crt_shader": options.crt_shader,
+                "dedither": options.dedither,
+                "smoothing": options.smoothing,
                 "widescreen_16_9": options.widescreen_anamorphic,
                 "game_controller_framework": true,
                 "core_audio_low_latency": true,
@@ -185,6 +193,27 @@ impl AppBundler {
                                 .status();
                         }
                         println!("  🎮 S'ha integrat el nucli de Saturn: {}", name.to_string_lossy());
+                    }
+                }
+            }
+        }
+
+        // Copy authentic BIOS ROMs if present
+        let bios_dest = resources_dir.join("bios");
+        fs::create_dir_all(&bios_dest)?;
+        if let Some(bios_src) = find_bios_dir() {
+            if let Ok(entries) = fs::read_dir(&bios_src) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                            if ext.eq_ignore_ascii_case("bin") || ext.eq_ignore_ascii_case("rom") {
+                                let name = entry.file_name();
+                                let target_bios = bios_dest.join(&name);
+                                let _ = fs::copy(&p, &target_bios);
+                                println!("  ⚡ S'ha integrat la BIOS autèntica de Saturn: {}", name.to_string_lossy());
+                            }
+                        }
                     }
                 }
             }
@@ -272,6 +301,39 @@ fn find_cores_dir() -> Option<PathBuf> {
         candidates.push(PathBuf::from(&home).join("Applications/SaturnMac.app/Contents/Resources/cores"));
     }
     candidates.push(PathBuf::from("/Applications/SaturnMac.app/Contents/Resources/cores"));
+
+    for c in candidates {
+        if c.exists() && c.is_dir() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+fn find_bios_dir() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("bios"));
+            candidates.push(exe_dir.join("../bios"));
+            candidates.push(exe_dir.join("../../Resources/bios"));
+            candidates.push(exe_dir.join("../Resources/bios"));
+            candidates.push(exe_dir.join("../../../runner/bios"));
+        }
+    }
+
+    candidates.push(PathBuf::from("runner/bios"));
+    candidates.push(PathBuf::from("../runner/bios"));
+    candidates.push(PathBuf::from("dist/SaturnMac.app/Contents/Resources/bios"));
+
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(PathBuf::from(&home).join("Documents/SaturnMac/runner/bios"));
+        candidates.push(PathBuf::from(&home).join("Documents/SaturnMac/dist/SaturnMac.app/Contents/Resources/bios"));
+        candidates.push(PathBuf::from(&home).join("Applications/SaturnMac.app/Contents/Resources/bios"));
+        candidates.push(PathBuf::from(&home).join("Library/Application Support/SaturnMac"));
+    }
+    candidates.push(PathBuf::from("/Applications/SaturnMac.app/Contents/Resources/bios"));
 
     for c in candidates {
         if c.exists() && c.is_dir() {
@@ -389,9 +451,20 @@ if [ -z "$ROM_TARGET" ]; then
     exit 1
 fi
 
+# Sync authentic BIOS ROMs to system support if present
+SATURN_SYS="$HOME/Library/Application Support/SaturnMac"
+mkdir -p "$SATURN_SYS"
+if [ -d "$RESOURCES/bios" ]; then
+    cp -n "$RESOURCES/bios/"*.bin "$SATURN_SYS/" 2>/dev/null || true
+fi
+
 # Standalone native runner
 RUNNER="$RESOURCES/bin/saturn_runner"
-CORE="$RESOURCES/cores/yabause_libretro.dylib"
+CORE="$RESOURCES/cores/ymir_libretro.dylib"
+
+if [ ! -f "$CORE" ]; then
+    CORE="$RESOURCES/cores/yabause_libretro.dylib"
+fi
 
 if [ ! -f "$CORE" ]; then
     CORE="$RESOURCES/cores/yabasanshiro_libretro.dylib"

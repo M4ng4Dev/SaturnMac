@@ -50,6 +50,8 @@ fn test_multiplatform_release_generation() {
         promotion_120hz: true,
         widescreen_anamorphic: false,
         crt_shader: false,
+        dedither: false,
+        smoothing: true,
         icon_png_path: None,
     };
 

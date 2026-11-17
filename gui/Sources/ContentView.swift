@@ -1268,6 +1268,8 @@ struct ContentView: View {
 
             if enableCRTShader { args.append("--crt") }
             if enableWidescreen { args.append("--widescreen") }
+            if enableDeDither { args.append("--dedither") }
+            if !enableAntiAliasing { args.append("--no-smoothing") }
 
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: saturnmacBin)

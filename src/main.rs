@@ -72,6 +72,14 @@ enum Commands {
         /// Enable 16:9 anamorphic widescreen geometry mode
         #[arg(long)]
         widescreen: bool,
+
+        /// Enable adaptive de-dither filter for mesh transparencies
+        #[arg(long)]
+        dedither: bool,
+
+        /// Disable adaptive anti-aliasing / smoothing filter
+        #[arg(long)]
+        no_smoothing: bool,
     },
 
     /// Generate complete multiplatform releases for macOS (.app & .dmg) and universal iOS/iPadOS (.ipa)
@@ -99,6 +107,14 @@ enum Commands {
         /// Enable 16:9 anamorphic widescreen geometry mode
         #[arg(long)]
         widescreen: bool,
+
+        /// Enable adaptive de-dither filter for mesh transparencies
+        #[arg(long)]
+        dedither: bool,
+
+        /// Disable adaptive anti-aliasing / smoothing filter
+        #[arg(long)]
+        no_smoothing: bool,
     },
 
     /// Generate a synthetic Sega Saturn disc image for testing
@@ -212,6 +228,8 @@ fn main() -> Result<()> {
             resolution,
             crt,
             widescreen,
+            dedither,
+            no_smoothing,
         } => {
             let is_archive = ArchiveExtractor::is_archive(&path);
             let (target_rom, temp_cleanup) = if is_archive {
@@ -234,6 +252,8 @@ fn main() -> Result<()> {
                 promotion_120hz: true,
                 widescreen_anamorphic: widescreen,
                 crt_shader: crt,
+                dedither,
+                smoothing: !no_smoothing,
                 icon_png_path: icon,
             };
 
@@ -257,6 +277,8 @@ fn main() -> Result<()> {
             resolution,
             crt,
             widescreen,
+            dedither,
+            no_smoothing,
         } => {
             let is_archive = ArchiveExtractor::is_archive(&path);
             let (target_rom, temp_cleanup) = if is_archive {
@@ -279,6 +301,8 @@ fn main() -> Result<()> {
                 promotion_120hz: true,
                 widescreen_anamorphic: widescreen,
                 crt_shader: crt,
+                dedither,
+                smoothing: !no_smoothing,
                 icon_png_path: icon,
             };
 
@@ -346,11 +370,22 @@ fn setup_runner_and_app() -> Result<()> {
         .status()
         .context("Error executant build_runner.sh")?;
     if status.success() {
-        // Embed official high-res Saturn icon
+        // Embed official high-res Saturn icon and authentic BIOS
         let saturn_app_res = Path::new("dist/SaturnMac.app/Contents/Resources");
         if saturn_app_res.exists() {
             let icns_bytes = icns::IcnsBuilder::default_saturn_icon();
             let _ = std::fs::write(saturn_app_res.join("AppIcon.icns"), icns_bytes);
+
+            let bios_src = Path::new("runner/bios");
+            if bios_src.exists() {
+                let dist_bios = saturn_app_res.join("bios");
+                let _ = std::fs::create_dir_all(&dist_bios);
+                if let Ok(entries) = std::fs::read_dir(bios_src) {
+                    for entry in entries.flatten() {
+                        let _ = std::fs::copy(entry.path(), dist_bios.join(entry.file_name()));
+                    }
+                }
+            }
         }
 
         println!("\n🎉 SaturnMac.app està a punt a: dist/SaturnMac.app!");

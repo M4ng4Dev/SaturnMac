@@ -125,15 +125,31 @@ static bool core_environment(unsigned cmd, void *data) {
             struct retro_variable *var = (struct retro_variable *)data;
             if (!var || !var->key) return false;
 
-            if (strcmp(var->key, "yabause_force_hle_bios") == 0) {
-                var->value = "enabled";
-                NSLog(@"[SaturnMac] Enabled yabause_force_hle_bios");
+            if (strcmp(var->key, "yabause_force_hle_bios") == 0 || strcmp(var->key, "yabasanshiro_force_hle_bios") == 0) {
+                // If authentic BIOS is found, DISABLE HLE so genuine Saturn IPL resets VDP1/VDP2 and color registers
+                NSString *sysDir = (g_saturn_dir[0] != '\0') ? [NSString stringWithUTF8String:g_saturn_dir] : [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/SaturnMac"];
+                BOOL hasRealBios = NO;
+                NSArray *biosNames = @[@"sega_101.bin", @"mpr-17933.bin", @"saturn_bios.bin"];
+                for (NSString *name in biosNames) {
+                    if ([[NSFileManager defaultManager] fileExistsAtPath:[sysDir stringByAppendingPathComponent:name]]) {
+                        hasRealBios = YES;
+                        break;
+                    }
+                }
+                var->value = hasRealBios ? "disabled" : "enabled";
+                NSLog(@"[SaturnMac] Core HLE BIOS variable: %s (authentic BIOS %s)", var->value, hasRealBios ? "active" : "not found");
                 return true;
-            } else if (strcmp(var->key, "yabause_addon_cartridge") == 0) {
+            } else if (strcmp(var->key, "yabause_addon_cartridge") == 0 || strcmp(var->key, "yabasanshiro_addon_cart") == 0 || strcmp(var->key, "ymir_cartridge") == 0) {
                 var->value = "4M_ram";
                 return true;
             } else if (strcmp(var->key, "yabause_numthreads") == 0) {
                 var->value = "4";
+                return true;
+            } else if (strcmp(var->key, "ymir_threaded_vdp1") == 0 || strcmp(var->key, "ymir_threaded_vdp2") == 0) {
+                var->value = "enabled";
+                return true;
+            } else if (strcmp(var->key, "ymir_transparent_meshes") == 0) {
+                var->value = "enabled";
                 return true;
             } else if (strcmp(var->key, "yabasanshiro_resolution") == 0 || strcmp(var->key, "yabause_resolution") == 0) {
                 if (g_opt_resolution_scale >= 8) {
@@ -186,10 +202,20 @@ static inline uint32_t blend_4_pixels(uint32_t c1, uint32_t c2, uint32_t c3, uin
 static void apply_adaptive_cross_dedither(uint32_t *pixels, unsigned width, unsigned height) {
     if (!g_opt_dedither || width < 4 || height < 4) return;
 
+    static uint32_t *s_filter_buf = NULL;
+    static size_t s_filter_buf_size = 0;
+    size_t needed = width * height * sizeof(uint32_t);
+    if (s_filter_buf_size < needed) {
+        s_filter_buf = realloc(s_filter_buf, needed);
+        s_filter_buf_size = needed;
+    }
+    memcpy(s_filter_buf, pixels, needed);
+
     for (unsigned y = 1; y < height - 1; ++y) {
-        uint32_t *prev = &pixels[(y - 1) * width];
-        uint32_t *curr = &pixels[y * width];
-        uint32_t *next = &pixels[(y + 1) * width];
+        const uint32_t *prev = &s_filter_buf[(y - 1) * width];
+        const uint32_t *curr = &s_filter_buf[y * width];
+        const uint32_t *next = &s_filter_buf[(y + 1) * width];
+        uint32_t *out = &pixels[y * width];
 
         for (unsigned x = 1; x < width - 1; ++x) {
             uint32_t p = curr[x];
@@ -206,7 +232,7 @@ static void apply_adaptive_cross_dedither(uint32_t *pixels, unsigned width, unsi
             // Checkerboard mesh pattern detection
             if ((diff_lr < 32 && diff_pl > 48 && diff_pl < 360) ||
                 (diff_ud < 32 && diff_pu > 48 && diff_pu < 360)) {
-                curr[x] = blend_4_pixels(p, l, r, (diff_ud < 32) ? u : d);
+                out[x] = blend_4_pixels(p, l, r, (diff_ud < 32) ? u : d);
             }
         }
     }
@@ -216,10 +242,20 @@ static void apply_adaptive_cross_dedither(uint32_t *pixels, unsigned width, unsi
 static void apply_edge_anti_aliasing(uint32_t *pixels, unsigned width, unsigned height) {
     if (!g_opt_smoothing || width < 4 || height < 4) return;
 
+    static uint32_t *s_aa_buf = NULL;
+    static size_t s_aa_buf_size = 0;
+    size_t needed = width * height * sizeof(uint32_t);
+    if (s_aa_buf_size < needed) {
+        s_aa_buf = realloc(s_aa_buf, needed);
+        s_aa_buf_size = needed;
+    }
+    memcpy(s_aa_buf, pixels, needed);
+
     for (unsigned y = 1; y < height - 1; ++y) {
-        uint32_t *prev = &pixels[(y - 1) * width];
-        uint32_t *curr = &pixels[y * width];
-        uint32_t *next = &pixels[(y + 1) * width];
+        const uint32_t *prev = &s_aa_buf[(y - 1) * width];
+        const uint32_t *curr = &s_aa_buf[y * width];
+        const uint32_t *next = &s_aa_buf[(y + 1) * width];
+        uint32_t *out = &pixels[y * width];
 
         for (unsigned x = 1; x < width - 1; ++x) {
             uint32_t c = curr[x];
@@ -241,7 +277,7 @@ static void apply_edge_anti_aliasing(uint32_t *pixels, unsigned width, unsigned 
             // Only smooth sharp polygon boundaries (preserving text/HUD sharpness)
             if (contrast > 40 && contrast < 220) {
                 uint32_t cross_avg = blend_4_pixels(l, r, u, d);
-                curr[x] = blend_2_pixels(c, cross_avg, 0.35f);
+                out[x] = blend_2_pixels(c, cross_avg, 0.35f);
             }
         }
     }
@@ -725,8 +761,16 @@ int main(int argc, const char * argv[]) {
                     NSDictionary *cfg = [NSJSONSerialization JSONObjectWithData:cfgData options:0 error:nil];
                     if (cfg) {
                         NSDictionary *opt = cfg[@"mac_optimizations"];
-                        if (opt && opt[@"internal_resolution"]) {
-                            g_opt_resolution_scale = [opt[@"internal_resolution"] intValue];
+                        if (opt) {
+                            if (opt[@"internal_resolution"]) {
+                                g_opt_resolution_scale = [opt[@"internal_resolution"] intValue];
+                            }
+                            if (opt[@"dedither"] != nil) {
+                                g_opt_dedither = [opt[@"dedither"] boolValue];
+                            }
+                            if (opt[@"smoothing"] != nil) {
+                                g_opt_smoothing = [opt[@"smoothing"] boolValue];
+                            }
                         }
                         NSDictionary *game = cfg[@"game"];
                         if (game && game[@"title"]) {
@@ -826,12 +870,36 @@ int main(int argc, const char * argv[]) {
             }
         }
 
+        // Ensure system directory and authentic Sega Saturn BIOS files are active
+        if (g_saturn_dir[0] == '\0') {
+            NSString *home = NSHomeDirectory();
+            NSString *saturnDir = [home stringByAppendingPathComponent:@"Library/Application Support/SaturnMac"];
+            [[NSFileManager defaultManager] createDirectoryAtPath:saturnDir withIntermediateDirectories:YES attributes:nil error:nil];
+            strncpy(g_saturn_dir, [saturnDir UTF8String], sizeof(g_saturn_dir) - 1);
+        }
+
+        if (bundleRes) {
+            NSString *bundleBiosDir = [bundleRes stringByAppendingPathComponent:@"bios"];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:bundleBiosDir]) {
+                NSArray *biosFiles = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:bundleBiosDir error:nil];
+                for (NSString *bf in biosFiles) {
+                    NSString *dst = [NSString stringWithFormat:@"%s/%@", g_saturn_dir, bf];
+                    if (![[NSFileManager defaultManager] fileExistsAtPath:dst]) {
+                        NSString *src = [bundleBiosDir stringByAppendingPathComponent:bf];
+                        [[NSFileManager defaultManager] copyItemAtPath:src toPath:dst error:nil];
+                        NSLog(@"[SaturnMac] Installed authentic BIOS: %@", bf);
+                    }
+                }
+            }
+        }
+
         if (!corePath) {
             NSString *appDir = [[NSBundle mainBundle] resourcePath];
             NSArray *candidates = @[
+                [appDir stringByAppendingPathComponent:@"cores/ymir_libretro.dylib"],
                 [appDir stringByAppendingPathComponent:@"cores/yabause_libretro.dylib"],
                 [appDir stringByAppendingPathComponent:@"cores/yabasanshiro_libretro.dylib"],
-                [appDir stringByAppendingPathComponent:@"cores/beetle_saturn_libretro.dylib"],
+                [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/SaturnMac/cores/ymir_libretro.dylib"],
                 [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/SaturnMac/cores/yabause_libretro.dylib"],
                 [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/SaturnMac/cores/yabasanshiro_libretro.dylib"]
             ];

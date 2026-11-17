@@ -19,7 +19,17 @@ clang -O3 -fobjc-arc \
     -I"$DIR" \
     "$DIR/saturn_runner.m" -o "$DIR/bin/saturn_runner"
 
-# Download Apple Silicon Saturn cores (yabause for software/MetalKit, and yabasanshiro)
+# Download Apple Silicon Saturn cores (ymir for high-accuracy software/VDP2, yabause, and yabasanshiro)
+mkdir -p "$DIR/cores"
+mkdir -p "$DIR/bios"
+
+if [ ! -f "$DIR/cores/ymir_libretro.dylib" ]; then
+    echo "Downloading Apple Silicon Saturn core (ymir)..."
+    curl -sL "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/ymir_libretro.dylib.zip" -o "$DIR/cores/ymir.zip"
+    unzip -q -o "$DIR/cores/ymir.zip" -d "$DIR/cores"
+    rm -f "$DIR/cores/ymir.zip"
+fi
+
 if [ ! -f "$DIR/cores/yabause_libretro.dylib" ]; then
     echo "Downloading Apple Silicon Saturn core (yabause)..."
     curl -sL "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/yabause_libretro.dylib.zip" -o "$DIR/cores/yabause.zip"
@@ -33,6 +43,25 @@ if [ ! -f "$DIR/cores/yabasanshiro_libretro.dylib" ]; then
     unzip -q -o "$DIR/cores/yabasanshiro.zip" -d "$DIR/cores"
     rm -f "$DIR/cores/yabasanshiro.zip"
 fi
+
+# Download Authentic Sega Saturn BIOS ROMs to guarantee accurate VDP1/VDP2 initialization
+if [ ! -f "$DIR/bios/saturn_bios.bin" ]; then
+    echo "Downloading authentic Sega Saturn universal BIOS..."
+    curl -sL "https://raw.githubusercontent.com/groenator/retroarch_system/master/Sega%20-%20Saturn/saturn_bios.bin" -o "$DIR/bios/saturn_bios.bin"
+fi
+if [ ! -f "$DIR/bios/sega_101.bin" ]; then
+    echo "Downloading authentic Sega Saturn Japan BIOS (v1.01)..."
+    curl -sL "https://raw.githubusercontent.com/groenator/retroarch_system/master/Sega%20-%20Saturn/sega_101.bin" -o "$DIR/bios/sega_101.bin"
+fi
+if [ ! -f "$DIR/bios/mpr-17933.bin" ]; then
+    echo "Downloading authentic Sega Saturn US/EU BIOS (v1.00)..."
+    curl -sL "https://raw.githubusercontent.com/groenator/retroarch_system/master/Sega%20-%20Saturn/mpr-17933.bin" -o "$DIR/bios/mpr-17933.bin"
+fi
+
+# Ensure user system directory has authentic BIOS files installed
+SYS_DIR="$HOME/Library/Application Support/SaturnMac"
+mkdir -p "$SYS_DIR"
+cp -n "$DIR/bios"/*.bin "$SYS_DIR/" 2>/dev/null || true
 
 # Remove quarantine flags and sign ad-hoc for Apple Silicon (ARM64 requirement)
 xattr -cr "$DIR" 2>/dev/null || true
@@ -75,8 +104,10 @@ fi
 cp "$DIR/bin/saturn_runner" "$APP_DIR/Contents/Resources/bin/saturn_runner"
 chmod +x "$APP_DIR/Contents/Resources/bin"/* 2>/dev/null || true
 
-# 3. Embed cores
+# 3. Embed cores and authentic BIOS
 cp "$DIR/cores"/*.dylib "$APP_DIR/Contents/Resources/cores/" 2>/dev/null || true
+mkdir -p "$APP_DIR/Contents/Resources/bios"
+cp "$DIR/bios"/*.bin "$APP_DIR/Contents/Resources/bios/" 2>/dev/null || true
 
 # 4. Embed default icons and assets
 mkdir -p "$APP_DIR/Contents/Resources"
